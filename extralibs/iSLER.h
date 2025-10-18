@@ -3,6 +3,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#if 1
+#define BLE_ACCESSADDR 0x8E89BED6
+#else
+#define BLE_ACCESSADDR 0x69420b09
+#endif
+
 #ifdef CH570_CH572
 #define CRCPOLY1           BB2
 #define ACCESSADDRESS1     BB3
@@ -703,8 +709,11 @@ void DevSetChannel(uint8_t channel) {
 	BB->CTRL_CFG = (BB->CTRL_CFG & 0xffffff80) | (channel & 0x7f);
 }
 
-void Frame_TX(uint8_t adv[], size_t len, uint8_t channel, uint8_t phy_mode) {
+void Frame_TX(uint8_t adv[], uint8_t channel, uint8_t phy_mode) {
+   const size_t len = adv[1];
+#if 0
 	__attribute__((aligned(4))) uint8_t  ADV_BUF[len+2]; // for the advertisement, which is 37 bytes + 2 header bytes
+#endif
 
 	BB->CTRL_TX = (BB->CTRL_TX & 0xfffffffc) | 1;
 
@@ -714,20 +723,24 @@ void Frame_TX(uint8_t adv[], size_t len, uint8_t channel, uint8_t phy_mode) {
 	//BB->CTRL_CFG |= (1<<6);
 	DevSetMode(DEVSETMODE_TX);
 
-	BB->ACCESSADDRESS1 = 0x8E89BED6; // access address
+	BB->ACCESSADDRESS1 = BLE_ACCESSADDR; // access address
 	BB->CRCINIT1 = 0x555555; // crc init
 #ifdef CH570_CH572
-	BB->ACCESSADDRESS2 = 0x8E89BED6;
+	BB->ACCESSADDRESS2 = BLE_ACCESSADDR;
 	BB->CRCINIT2 = 0x555555;
 	BB->CRCPOLY1 = (BB->CRCPOLY1 & 0xff000000) | 0x80032d; // crc poly
 	BB->CRCPOLY2 = (BB->CRCPOLY2 & 0xff000000) | 0x80032d;
 #endif
 	// LL->LL1 = (LL->LL1 & 0xfffffffe) | 1; // The "| 1" is for AUTO mode, to swap between RX <-> TX when either happened
 
+#if 0
 	ADV_BUF[0] = 0x02; // PDU 0x00, 0x02, 0x06 seem to work, with only 0x02 showing up on the phone
 	ADV_BUF[1] = len ;
 	memcpy(&ADV_BUF[2], adv, len);
 	LL->FRAME_BUF = (uint32_t)ADV_BUF;
+#else
+   LL->FRAME_BUF = (uint32_t)adv;
+#endif
 
 	// Wait for tuning bit to clear.
 	for( int timeout = 3000; !(RF->RF26 & 0x1000000) && timeout >= 0; timeout-- );
@@ -821,10 +834,10 @@ void Frame_RX(uint8_t frame_info[], uint8_t channel, uint8_t phy_mode) {
 	BB->BB4 = (BB->BB4 & 0x00ffffff) | ((phy_mode == PHY_2M) ? 0x78000000 : 0x7f000000);
 #endif
 
-	BB->ACCESSADDRESS1 = 0x8E89BED6; // access address
+	BB->ACCESSADDRESS1 = BLE_ACCESSADDR; // access address
 	BB->CRCINIT1 = 0x555555; // crc init
 #ifdef CH570_CH572
-	BB->ACCESSADDRESS2 = 0x8E89BED6;
+	BB->ACCESSADDRESS2 = BLE_ACCESSADDR;
 	BB->CRCINIT2 = 0x555555;
 	BB->CRCPOLY1 = (BB->CRCPOLY1 & 0xff000000) | 0x80032d; // crc poly
 	BB->CRCPOLY2 = (BB->CRCPOLY2 & 0xff000000) | 0x80032d;
