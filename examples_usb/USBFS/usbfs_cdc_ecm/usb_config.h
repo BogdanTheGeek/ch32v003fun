@@ -5,9 +5,9 @@
 #include "ch32fun.h"
 
 #define FUSB_CONFIG_EPS       4 // Include EP0 in this count
-#define FUSB_EP1_MODE        -1 // IN
-#define FUSB_EP2_MODE         1 // OUT
-#define FUSB_EP3_MODE        -1 // IN
+#define FUSB_EP1_MODE         1 // TX
+#define FUSB_EP2_MODE        -1 // RX
+#define FUSB_EP3_MODE         1 // TX
 #define FUSB_SUPPORTS_SLEEP   0
 #define FUSB_HID_INTERFACES   0
 #define FUSB_CURSED_TURBO_DMA 0 // Hacky, but seems fine, shaves 2.5us off filling 64-byte buffers.
@@ -108,14 +108,14 @@ static const uint8_t config_descriptor[ ] =
   0x00,        // bInterfaceSubClass
   0x00,        // bInterfaceProtocol - Transparent
   0x00,        // iInterface (String Index)
-  // EP2 - device to host
+  // EP2 OUT - device to host
   0x07,        // bLength
   0x05,        // bDescriptorType (Endpoint)
   0x02,        // bEndpointAddress (OUT/H2D)
   0x02,        // bmAttributes (Bulk)
   0x40, 0x00,  // wMaxPacketSize 64
   0x00,        // bInterval 0 (unit depends on device speed)
-  // EP3 - host to device
+  // EP3 IN - host to device
   0x07,        // bLength
   0x05,        // bDescriptorType (Endpoint)
   0x83,        // bEndpointAddress (IN/D2H)
