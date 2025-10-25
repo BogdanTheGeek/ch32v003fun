@@ -108,14 +108,14 @@ static const uint8_t config_descriptor[ ] =
   0x00,        // bInterfaceSubClass
   0x00,        // bInterfaceProtocol - Transparent
   0x00,        // iInterface (String Index)
-  // EP2 OUT - device to host
+  // EP2 OUT - host to device
   0x07,        // bLength
   0x05,        // bDescriptorType (Endpoint)
   0x02,        // bEndpointAddress (OUT/H2D)
   0x02,        // bmAttributes (Bulk)
   0x40, 0x00,  // wMaxPacketSize 64
   0x00,        // bInterval 0 (unit depends on device speed)
-  // EP3 IN - host to device
+  // EP3 IN - device to host
   0x07,        // bLength
   0x05,        // bDescriptorType (Endpoint)
   0x83,        // bEndpointAddress (IN/D2H)

@@ -32,7 +32,7 @@ typedef struct __attribute__( ( packed ) )
 } usb_request_t;
 
 static __attribute__( ( aligned( 4 ) ) ) usb_request_t notify_nc = {
-	.bmRequestType = 0xA1, // 0xA1 | 0x21
+	.bmRequestType = 0xA1,
 	.bRequest = 0 /* NETWORK_CONNECTION */,
 	.wValue = 1 /* Connected */,
 	.wIndex = USB_ECM_NOTIFY_ITF,
