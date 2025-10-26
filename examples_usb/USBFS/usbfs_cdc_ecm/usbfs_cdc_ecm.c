@@ -4,6 +4,13 @@
 
 #include "fsusb.h"
 
+#include "uip.h"
+#include "uip_arp.h"
+
+#include "httpd.h"
+
+#define BUF ( (struct uip_eth_hdr *)&uip_buf[0] )
+
 #define SYSTICK_ONE_MILLISECOND ( (uint32_t)FUNCONF_SYSTEM_CORE_CLOCK / 1000 )
 
 /* CDC ECM Class requests Section 6.2 in CDC ECM spec */
@@ -39,19 +46,39 @@ static __attribute__( ( aligned( 4 ) ) ) usb_request_t notify_nc = {
 	.wLength = 0,
 };
 
-struct
+static struct
 {
 	int in[4];
 	int out[4];
 } usb_stats = { 0 };
+static int debugger = 0;
 
 extern volatile uint8_t usb_debug;
 static volatile uint32_t SysTick_Ms = 0;
-int debugger = 0;
-static bool volatile send_nc = false;
+static volatile bool send_nc = false;
+
+static volatile uint8_t buff[UIP_BUFSIZE];
+static volatile uint32_t buff_len = 0;
+static volatile bool busy = false;
 
 static void systick_init( void );
 
+static void ethdev_init( void );
+static size_t ethdev_read( void );
+static void ethdev_send( void );
+
+
+int uip_get_ip( u16_t addr[2], int index )
+{
+	switch ( index )
+	{
+		case 0: return addr[0] & 0xff;
+		case 1: return addr[0] >> 8;
+		case 2: return addr[1] & 0xff;
+		case 3: return addr[1] >> 8;
+	}
+	return 0;
+}
 int main()
 {
 	SystemInit();
@@ -67,22 +94,115 @@ int main()
 
 	USBFSSetup();
 
-	uint32_t last = 0;
+	ethdev_init();
 
-	while ( 1 )
+	printf( "Started USB CDC ECM + uIP HTTPD example\n" );
+
+	uip_init();
+	httpd_init();
+	static const struct uip_eth_addr mac = { .addr = { 0x00, 0x22, 0x97, 0x08, 0xA0, 0x03 } };
+	uip_setethaddr( mac );
+
+	uint32_t last_ms = SysTick_Ms;
+	int arptimer = 0;
+
+	for ( ;; )
 	{
-		if ( SysTick_Ms - last >= 1000 )
-		{
-			last = SysTick_Ms;
-			printf( "%lds: USB Stats - IN: EP1=%d EP2=%d EP3=%d | OUT: EP1=%d EP2=%d EP3=%d\n", SysTick_Ms,
-				usb_stats.in[1], usb_stats.in[2], usb_stats.in[3], usb_stats.out[1], usb_stats.out[2],
-				usb_stats.out[3] );
-		}
 
 		if ( send_nc )
 		{
 			(void)USBFS_SendEndpointNEW( EP_NOTIFY, (uint8_t *)&notify_nc, sizeof( notify_nc ), 0 );
 			send_nc = false;
+		}
+
+		/* Let the ethdev network device driver read an entire IP packet
+	  into the uip_buf. If it must wait for more than 0.5 seconds, it
+	  will return with the return value 0. If so, we know that it is
+	  time to call upon the uip_periodic(). Otherwise, the ethdev has
+	  received an IP packet that is to be processed by uIP. */
+		uip_len = ethdev_read();
+		if ( uip_len > 0 )
+		{
+			if ( BUF->type == htons( UIP_ETHTYPE_IP ) )
+			{
+				uip_tcpip_hdr *hdr = (uip_tcpip_hdr *)&uip_buf[UIP_LLH_LEN];
+				printf( "IP (%d): %d.%d.%d.%d -> %d.%d.%d.%d\n", uip_len, uip_get_ip( hdr->srcipaddr, 0 ),
+					uip_get_ip( hdr->srcipaddr, 1 ), uip_get_ip( hdr->srcipaddr, 2 ), uip_get_ip( hdr->srcipaddr, 3 ),
+					uip_get_ip( hdr->destipaddr, 0 ), uip_get_ip( hdr->destipaddr, 1 ),
+					uip_get_ip( hdr->destipaddr, 2 ), uip_get_ip( hdr->destipaddr, 3 ) );
+
+				uip_arp_ipin();
+				uip_input();
+				/* If the above function invocation resulted in data that
+				   should be sent out on the network, the global variable
+				   uip_len is set to a value > 0. */
+				if ( uip_len > 0 )
+				{
+					uip_arp_out();
+					ethdev_send();
+				}
+			}
+			else if ( BUF->type == htons( UIP_ETHTYPE_ARP ) )
+			{
+				printf( "ARP (%d): %02x:%02x:%02x:%02x:%02x:%02x -> %02x:%02x:%02x:%02x:%02x:%02x\n", uip_len,
+					BUF->src.addr[0], BUF->src.addr[1], BUF->src.addr[2], BUF->src.addr[3], BUF->src.addr[4],
+					BUF->src.addr[5], BUF->dest.addr[0], BUF->dest.addr[1], BUF->dest.addr[2], BUF->dest.addr[3],
+					BUF->dest.addr[4], BUF->dest.addr[5] );
+				uip_arp_arpin();
+				/* If the above function invocation resulted in data that
+				   should be sent out on the network, the global variable
+				   uip_len is set to a value > 0. */
+				if ( uip_len > 0 )
+				{
+					ethdev_send();
+				}
+			}
+		}
+
+		if ( ( SysTick_Ms - last_ms ) >= 500 )
+		{
+			last_ms = SysTick_Ms;
+			for ( int i = 0; i < UIP_CONNS; i++ )
+			{
+				uip_periodic( i );
+				/* If the above function invocation resulted in data that
+				   should be sent out on the network, the global variable
+				   uip_len is set to a value > 0. */
+				if ( uip_len > 0 )
+				{
+					uip_arp_out();
+					ethdev_send();
+				}
+			}
+
+#if UIP_UDP
+			for ( int i = 0; i < UIP_UDP_CONNS; i++ )
+			{
+				uip_udp_periodic( i );
+				/* If the above function invocation resulted in data that
+				   should be sent out on the network, the global variable
+				   uip_len is set to a value > 0. */
+				if ( uip_len > 0 )
+				{
+					uip_arp_out();
+					ethdev_send();
+				}
+			}
+#endif /* UIP_UDP */
+
+			if ( ( arptimer & 0b11 ) == 2 )
+			{
+				printf( "%ld:\tUSB Stats: EP0 %d/%d EP1 %d/%d EP2 %d/%d EP3 %d/%d\n", SysTick_Ms, usb_stats.in[0],
+					usb_stats.out[0], usb_stats.in[1], usb_stats.out[1], usb_stats.in[2], usb_stats.out[2],
+					usb_stats.in[3], usb_stats.out[3] );
+			}
+
+			/* Call the ARP timer function every 10 seconds. */
+			if ( ++arptimer == 20 )
+			{
+				uip_arp_timer();
+				arptimer = 0;
+			}
 		}
 	}
 }
@@ -91,7 +211,7 @@ int main()
  * Initialises the SysTick to trigger an IRQ with auto-reload, using HCLK/1 as
  * its clock source
  */
-void systick_init( void )
+static void systick_init( void )
 {
 	// Reset any pre-existing configuration
 	SysTick->CTLR = 0x0000;
@@ -106,11 +226,7 @@ void systick_init( void )
 	// busywait delay funtions used by ch32v003_fun.
 	SysTick->CTLR |= SYSTICK_CTLR_STE | // Enable Counter
 	                 SYSTICK_CTLR_STIE | // Enable Interrupts
-#if 1
 	                 SYSTICK_CTLR_STCLK; // Set Clock Source to HCLK/1
-#else
-	                 0; // Set Clock Source to HCLK/8
-#endif
 
 	// Enable the SysTick IRQ
 	NVIC_EnableIRQ( SysTicK_IRQn );
@@ -134,15 +250,10 @@ void SysTick_Handler( void )
 	SysTick_Ms++;
 }
 
-#if 1
 int HandleInRequest( struct _USBState *ctx, int endp, uint8_t *data, int len )
 {
 	usb_stats.in[endp]++;
-	return USB_NAK;
-}
-#else
-int HandleInRequest( struct _USBState *ctx, int endp, uint8_t *data, int len )
-{
+
 	int ret = USB_NAK; // Just NAK
 	switch ( endp )
 	{
@@ -155,44 +266,60 @@ int HandleInRequest( struct _USBState *ctx, int endp, uint8_t *data, int len )
 	}
 	return ret;
 }
-#endif
 
-#if 1
 void HandleDataOut( struct _USBState *ctx, int endp, uint8_t *data, int len )
 {
+	usb_stats.out[endp]++;
+
 	if ( endp == 0 )
 	{
 		ctx->USBFS_SetupReqLen = 0; // To ACK
-	}
-	else
-	{
-		usb_stats.out[endp]++;
-	}
-}
-#else
-void HandleDataOut( struct _USBState *ctx, int endp, uint8_t *data, int len )
-{
-	if ( endp == 0 )
-	{
-		ctx->USBFS_SetupReqLen = 0; // To ACK
-		if ( ctx->USBFS_SetupReqCode == CDC_SET_LINE_CODING )
-		{
-			if ( debugger ) printf( "CDC_SET_LINE_CODING\n" );
-		}
 	}
 	if ( endp == EP_RECV )
 	{
-		if ( debugger ) printf( "Out EP%d len: %d\n", endp, len );
-		// USBFS->UEP2_DMA = (uint32_t)( uart_tx_buffer + write_pos );
-		// printf("USBFS->UEP2_DMA = %08x\n", USBFS->UEP2_DMA);
+#if 0
+		if ( debugger )
+		{
+			printf( "RECV len: %d\n", len );
+		}
+#else
+		// TODO: NAK doesn't work????
+		if ( busy )
+		{
+			// still processing previous packet
+			// printf( "RECV busy, dropping packet %d\n", len );
+			// USBFS_SendNAK( EP_RECV, 0 );
+			return;
+		}
+
+		if ( ( buff_len + len ) > sizeof( buff ) )
+		{
+			buff_len = 0;
+			// USBFS_SendNAK( EP_RECV, 0 );
+			return;
+		}
+
+#if 0
+		USBFS->UEP2_DMA = (uint32_t)( buff + buff_len );
+#else
+		memcpy( (void *)( buff + buff_len ), (void *)data, len );
+#endif
+		buff_len += len;
+		if ( len < 64 )
+		{
+			// printf( "RECV done, total len: %d\n", (int)buff_len );
+			busy = true;
+		}
+		// USBFS_SendACK( EP_RECV, 0 );
+		ctx->USBFS_SetupReqLen = 0; // To ACK
+#endif
 	}
 }
-#endif
 
 int HandleSetupCustom( struct _USBState *ctx, int setup_code )
 {
 	int ret = USB_NAK;
-	if ( debugger ) printf( "HandleSetupCustom - 0x%02x, len = %d\n", setup_code, ctx->USBFS_SetupReqLen );
+	// if ( debugger ) printf( "HandleSetupCustom - 0x%02x, len = %d\n", setup_code, ctx->USBFS_SetupReqLen );
 	if ( ctx->USBFS_SetupReqType & USB_REQ_TYP_CLASS )
 	{
 		switch ( setup_code )
@@ -216,3 +343,64 @@ int HandleSetupCustom( struct _USBState *ctx, int setup_code )
 	return ret;
 }
 
+static void ethdev_init( void )
+{
+	printf( "ethdev_init\n" );
+	// Wait for USB enumeration
+	while ( 1 )
+	{
+		if ( send_nc )
+		{
+			while ( -1 == USBFS_SendEndpointNEW( EP_NOTIFY, (uint8_t *)&notify_nc, sizeof( notify_nc ), 0 ) )
+				;
+			send_nc = false;
+			break;
+		}
+	}
+	Delay_Ms( 100 );
+	printf( "ethdev_init done\n" );
+}
+
+static size_t ethdev_read( void )
+{
+	if ( !busy ) return 0;
+
+	if ( debugger ) printf( "ethdev_read: buff_len=%d\n", (int)buff_len );
+	const size_t len = buff_len;
+	memcpy( (void *)uip_buf, (void *)buff, len );
+	buff_len = 0;
+	busy = false;
+	return len;
+}
+
+static void ethdev_send( void )
+{
+	if ( debugger ) printf( "ethdev_send: uip_len=%d\n", (int)uip_len );
+
+	size_t remaining = uip_len;
+	while ( remaining )
+	{
+		const size_t len = ( remaining > 64 ) ? 64 : remaining;
+		remaining -= len;
+		uint8_t *buf = &uip_buf[uip_len - remaining];
+
+		// TODO: do I need to copy the last packet
+		const bool last = ( remaining == 0 );
+
+		// Wait for endpoint to be free
+		while ( -1 == USBFS_SendEndpointNEW( EP_SEND, buf, len, last ) )
+			;
+
+		// Handle zero-length packet if uip_len is multiple of endpoint size
+		if ( len == 64 && last )
+		{
+			while ( -1 == USBFS_SendEndpointNEW( EP_SEND, NULL, 0, 0 ) )
+				;
+		}
+	}
+}
+
+void uip_log( char *msg )
+{
+	if ( debugger ) printf( "uIP: %s\n", msg );
+}

@@ -86,7 +86,11 @@ static const uint8_t config_descriptor[ ] =
   0x0F,                // bDescriptorsubtype, ETHERNET NETWORKING
   0x03,                // iMACAddress, Index of MAC address string
   0x00,0x00,0x00,0x00, // bmEthernetStatistics - Handles None
-  0xEA,05,             // wMaxSegmentSize - 1514 bytes  TODO: Maybe this should be smaller
+#if 1
+  0xEA,05,             // wMaxSegmentSize - 1514 bytes
+#else
+  0x40,00,             // wMaxSegmentSize - 64 bytes
+#endif
   0x00,0x00,           // wNumberMCFilters - No multicast filters
   0x00,                // bNumberPowerFilters - No wake-up feature
    
