@@ -67,6 +67,16 @@ static void ethdev_init( void );
 static size_t ethdev_read( void );
 static void ethdev_send( void );
 
+void hexdump( const void *ptr, size_t len )
+{
+	const uint8_t *b = (const uint8_t *)ptr;
+	for ( size_t i = 0; i < len; i++ )
+	{
+		if ( ( i & 0x0f ) == 0 ) printf( "\n%04x: ", (unsigned int)i );
+		printf( "%02x ", b[i] );
+	}
+	printf( "\n" );
+}
 
 int uip_get_ip( u16_t addr[2], int index )
 {
@@ -144,10 +154,12 @@ int main()
 			}
 			else if ( BUF->type == htons( UIP_ETHTYPE_ARP ) )
 			{
+#if 0
 				printf( "ARP (%d): %02x:%02x:%02x:%02x:%02x:%02x -> %02x:%02x:%02x:%02x:%02x:%02x\n", uip_len,
 					BUF->src.addr[0], BUF->src.addr[1], BUF->src.addr[2], BUF->src.addr[3], BUF->src.addr[4],
 					BUF->src.addr[5], BUF->dest.addr[0], BUF->dest.addr[1], BUF->dest.addr[2], BUF->dest.addr[3],
 					BUF->dest.addr[4], BUF->dest.addr[5] );
+#endif
 				uip_arp_arpin();
 				/* If the above function invocation resulted in data that
 				   should be sent out on the network, the global variable
@@ -190,7 +202,7 @@ int main()
 			}
 #endif /* UIP_UDP */
 
-			if ( ( arptimer & 0b11 ) == 2 )
+			if ( ( arptimer & 0b11 ) == 2  && 0)
 			{
 				printf( "%ld:\tUSB Stats: EP0 %d/%d EP1 %d/%d EP2 %d/%d EP3 %d/%d\n", SysTick_Ms, usb_stats.in[0],
 					usb_stats.out[0], usb_stats.in[1], usb_stats.out[1], usb_stats.in[2], usb_stats.out[2],
@@ -375,20 +387,24 @@ static size_t ethdev_read( void )
 
 static void ethdev_send( void )
 {
-	if ( debugger ) printf( "ethdev_send: uip_len=%d\n", (int)uip_len );
+	if ( debugger && 0 )
+	{
+		printf( "ethdev_send: uip_len=%d\n", (int)uip_len );
+		hexdump( (const void *)uip_buf, uip_len );
+	}
 
 	size_t remaining = uip_len;
 	while ( remaining )
 	{
 		const size_t len = ( remaining > 64 ) ? 64 : remaining;
-		remaining -= len;
 		uint8_t *buf = &uip_buf[uip_len - remaining];
+		remaining -= len;
 
 		// TODO: do I need to copy the last packet
 		const bool last = ( remaining == 0 );
 
 		// Wait for endpoint to be free
-		while ( -1 == USBFS_SendEndpointNEW( EP_SEND, buf, len, last ) )
+		while ( -1 == USBFS_SendEndpointNEW( EP_SEND, buf, len, 1 ) )
 			;
 
 		// Handle zero-length packet if uip_len is multiple of endpoint size
