@@ -81,6 +81,8 @@ typedef uint8_t u8_t;
  */
 typedef uint16_t u16_t;
 
+typedef unsigned int u32_t;
+
 /**
  * The statistics data type.
  *
@@ -116,7 +118,7 @@ typedef uint16_t uip_stats_t;
  *
  * \hideinitializer
  */
-#define UIP_FIXEDADDR    1
+#define UIP_FIXEDADDR    0
 
 /**
  * Ping IP address asignment.
@@ -255,7 +257,7 @@ typedef uint16_t uip_stats_t;
  *
  * \hideinitializer
  */
-#define UIP_UDP           0
+#define UIP_UDP           1
 
 /**
  * Toggles if UDP checksums should be used or not.
@@ -279,7 +281,7 @@ typedef uint16_t uip_stats_t;
  *
  * \hideinitializer
  */
-#define UIP_UDP_APPCALL  udp_appcall
+// #define UIP_UDP_APPCALL  udp_appcall
 
 /** @} */
 /*------------------------------------------------------------------------------*/
@@ -298,7 +300,7 @@ typedef uint16_t uip_stats_t;
  *
  * \hideinitializer
  */
-#define UIP_ACTIVE_OPEN 0
+#define UIP_ACTIVE_OPEN 1
 
 /**
  * The maximum number of simultaneously open TCP connections.
@@ -330,7 +332,7 @@ typedef uint16_t uip_stats_t;
  * \hideinitializer
  */
 // TODO: Review this value
-#define UIP_RECEIVE_WINDOW   (UIP_BUFSIZE-UIP_LLH_LEN)
+#define UIP_RECEIVE_WINDOW   (UIP_BUFSIZE)
 
 /**
  * Determines if support for TCP urgent data notification should be
@@ -557,6 +559,10 @@ struct httpd_state {
    used. If you don't use the example web server, you should change
    this. */
 #include "httpd.h"
+
+#if UIP_UDP
+#include "dhcpd.h"
+#endif /* UIP_UDP */
 
 
 #endif /* __UIPOPT_H__ */

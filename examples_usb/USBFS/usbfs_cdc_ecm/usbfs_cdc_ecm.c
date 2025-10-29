@@ -7,6 +7,7 @@
 #include "uip.h"
 #include "uip_arp.h"
 
+#include "dhcpd.h"
 #include "httpd.h"
 
 #define BUF ( (struct uip_eth_hdr *)&uip_buf[0] )
@@ -110,8 +111,22 @@ int main()
 
 	uip_init();
 	httpd_init();
-	static const struct uip_eth_addr mac = { .addr = { 0x00, 0x22, 0x97, 0x08, 0xA0, 0x03 } };
+	dhcpd_init();
+#if 1
+	// different to the IF MAC
+	static const struct uip_eth_addr mac = { .addr = { 0x00, 0x22, 0x97, 0x08, 0xA0, 0x69 } };
 	uip_setethaddr( mac );
+
+	u16_t ipaddr[2];
+	// uip_ipaddr(ipaddr, 192,168,8,111);
+	uip_ipaddr( ipaddr, 255, 255, 255, 255 );
+	uip_sethostaddr( ipaddr );
+	uip_ipaddr( ipaddr, 255, 255, 255, 0 );
+	uip_setnetmask( ipaddr );
+	uip_ipaddr( ipaddr, 192, 168, 8, 1 );
+	// uip_ipaddr(ipaddr, 0,0,0,0);
+	uip_setdraddr( ipaddr );
+#endif
 
 	uint32_t last_ms = SysTick_Ms;
 	int arptimer = 0;
@@ -202,7 +217,7 @@ int main()
 			}
 #endif /* UIP_UDP */
 
-			if ( ( arptimer & 0b11 ) == 2  && 0)
+			if ( ( arptimer & 0b11 ) == 2 && 0 )
 			{
 				printf( "%ld:\tUSB Stats: EP0 %d/%d EP1 %d/%d EP2 %d/%d EP3 %d/%d\n", SysTick_Ms, usb_stats.in[0],
 					usb_stats.out[0], usb_stats.in[1], usb_stats.out[1], usb_stats.in[2], usb_stats.out[2],
@@ -387,7 +402,7 @@ static size_t ethdev_read( void )
 
 static void ethdev_send( void )
 {
-	if ( debugger && 0 )
+	if ( debugger )
 	{
 		printf( "ethdev_send: uip_len=%d\n", (int)uip_len );
 		hexdump( (const void *)uip_buf, uip_len );
