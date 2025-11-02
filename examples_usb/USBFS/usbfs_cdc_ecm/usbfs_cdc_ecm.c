@@ -350,20 +350,21 @@ static size_t ethdev_read( void )
 
 static void ethdev_send( void )
 {
-	static uint8_t usb_buf[UIP_BUFSIZE];
-
-	memcpy( usb_buf, uip_buf, 40 + UIP_LLH_LEN );
 	const size_t offset = 40 + UIP_LLH_LEN;
-	if ( uip_len > offset )
+
+   // NOTE: uIP 0.9 doesn't place appdata in contiguous buffer to avoid copy on slip devices
+   // However, for USB CDC ECM, we need a contiguous buffer
+	if ( ( uip_len > offset ) && ( uip_appdata != &uip_buf[offset] ) )
 	{
-		memcpy( &usb_buf[offset], (void *)uip_appdata, uip_len - offset );
+		// Need to copy appdata into contiguous buffer
+		memcpy( &uip_buf[offset], (void *)uip_appdata, uip_len - offset );
 	}
 
 	if ( debugger )
 	{
 		printf( "ethdev_send: uip_len=%d\n", (int)uip_len );
 #if HEXDUMP_ENABLE
-		hexdump( (const void *)usb_buf, uip_len );
+		hexdump( (const void *)uip_buf, uip_len );
 #endif
 	}
 
@@ -371,7 +372,7 @@ static void ethdev_send( void )
 	while ( remaining )
 	{
 		const size_t len = ( remaining > 64 ) ? 64 : remaining;
-		uint8_t *buf = &usb_buf[uip_len - remaining];
+		uint8_t *buf = &uip_buf[uip_len - remaining];
 		remaining -= len;
 
 		// TODO: do I need to copy the last packet
