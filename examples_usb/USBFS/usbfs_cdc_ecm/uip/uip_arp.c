@@ -236,6 +236,12 @@ void
 uip_arp_ipin(void)
 {
   uip_len -= sizeof(struct uip_eth_hdr);
+
+  if (IPBUF->srcipaddr[0] == 0 && IPBUF->srcipaddr[1] == 0) {
+     // special case for 0.0.0.0
+     uip_arp_update(IPBUF->srcipaddr, &(IPBUF->ethhdr.src));
+     return;
+  }
 	
   /* Only insert/update an entry if the source IP address of the
      incoming IP packet comes from a host on the local network. */

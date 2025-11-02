@@ -656,6 +656,13 @@ uip_process(u8_t flag)
     }
   }
 #endif /* UIP_PINGADDRCONF */
+
+  if(BUF->destipaddr[0] == 0xffff &&
+     BUF->destipaddr[1] == 0xffff) {
+    /* Broadcast address. */
+    UIP_LOG("ip: broadcast packet received.");
+    goto broadcast;
+  }
   
   /* Check if the packet is destined for our IP address. */  
   if(BUF->destipaddr[0] != uip_hostaddr[0]) {
@@ -668,6 +675,8 @@ uip_process(u8_t flag)
     UIP_LOG("ip: packet not for us.");        
     goto drop;
   }
+
+broadcast:
 
   if(uip_ipchksum() != 0xffff) { /* Compute and check the IP header
 				    checksum. */
