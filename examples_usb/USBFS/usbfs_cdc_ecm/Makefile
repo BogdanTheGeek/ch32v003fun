@@ -1,4 +1,3 @@
-all : flash
 
 TARGET:=usbfs_cdc_ecm
 # TARGET_MCU:=CH32X035
@@ -21,6 +20,8 @@ UIPFILES := $(filter-out $(FSPATH)/fsdata.c, $(wildcard uip/*.c))
 ADDITIONAL_C_FILES += $(filter-out $(TARGET).c, $(wildcard *.c))
 ADDITIONAL_C_FILES += $(UIPFILES)
 EXTRA_CFLAGS := -I./uip
+
+all : $(FSPATH)/fsdata.c flash
 
 include ../../../ch32fun/ch32fun.mk
 CFLAGS+=-D$(TARGET_MCU_PACKAGE)

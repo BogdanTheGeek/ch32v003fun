@@ -10,6 +10,8 @@
 #include "dhcpd.h"
 #include "httpd.h"
 
+#define DHCPD_ENABLE 0
+
 #define BUF ( (struct uip_eth_hdr *)&uip_buf[0] )
 
 #define SYSTICK_ONE_MILLISECOND ( (uint32_t)FUNCONF_SYSTEM_CORE_CLOCK / 1000 )
@@ -62,34 +64,14 @@ static volatile uint8_t buff[UIP_BUFSIZE];
 static volatile uint32_t buff_len = 0;
 static volatile bool busy = false;
 
-static void systick_init( void );
-
 static void ethdev_init( void );
 static size_t ethdev_read( void );
 static void ethdev_send( void );
 
-void hexdump( const void *ptr, size_t len )
-{
-	const uint8_t *b = (const uint8_t *)ptr;
-	for ( size_t i = 0; i < len; i++ )
-	{
-		if ( ( i & 0x0f ) == 0 ) printf( "\n%04x: ", (unsigned int)i );
-		printf( "%02x ", b[i] );
-	}
-	printf( "\n" );
-}
+static void systick_init( void );
+static void hexdump( const void *ptr, size_t len );
+static int uip_get_ip( u16_t addr[2], int index );
 
-int uip_get_ip( u16_t addr[2], int index )
-{
-	switch ( index )
-	{
-		case 0: return addr[0] & 0xff;
-		case 1: return addr[0] >> 8;
-		case 2: return addr[1] & 0xff;
-		case 3: return addr[1] >> 8;
-	}
-	return 0;
-}
 int main()
 {
 	SystemInit();
@@ -111,20 +93,25 @@ int main()
 
 	uip_init();
 	httpd_init();
-	dhcpd_init();
-#if 1
+
 	// different to the IF MAC
 	static const struct uip_eth_addr mac = { .addr = { 0x00, 0x22, 0x97, 0x08, 0xA0, 0x69 } };
 	uip_setethaddr( mac );
 
 	u16_t ipaddr[2];
-	// uip_ipaddr(ipaddr, 192,168,8,111);
-	uip_ipaddr( ipaddr, 255, 255, 255, 255 );
-	uip_sethostaddr( ipaddr );
 	uip_ipaddr( ipaddr, 255, 255, 255, 0 );
 	uip_setnetmask( ipaddr );
+
+#if DHCPD_ENABLE && UIP_UDP
+	dhcpd_init();
+	uip_ipaddr( ipaddr, 255, 255, 255, 255 );
+	uip_sethostaddr( ipaddr );
+	uip_ipaddr( ipaddr, 0, 0, 0, 0 );
+	uip_setdraddr( ipaddr );
+#else
+	uip_ipaddr( ipaddr, 192, 168, 8, 111 );
+	uip_sethostaddr( ipaddr );
 	uip_ipaddr( ipaddr, 192, 168, 8, 1 );
-	// uip_ipaddr(ipaddr, 0,0,0,0);
 	uip_setdraddr( ipaddr );
 #endif
 
@@ -217,12 +204,14 @@ int main()
 			}
 #endif /* UIP_UDP */
 
-			if ( ( arptimer & 0b11 ) == 2 && 0 )
+#if 0
+			if ( ( arptimer & 0b11 ) == 2 )
 			{
 				printf( "%ld:\tUSB Stats: EP0 %d/%d EP1 %d/%d EP2 %d/%d EP3 %d/%d\n", SysTick_Ms, usb_stats.in[0],
 					usb_stats.out[0], usb_stats.in[1], usb_stats.out[1], usb_stats.in[2], usb_stats.out[2],
 					usb_stats.in[3], usb_stats.out[3] );
 			}
+#endif
 
 			/* Call the ARP timer function every 10 seconds. */
 			if ( ++arptimer == 20 )
@@ -234,47 +223,9 @@ int main()
 	}
 }
 
-/*
- * Initialises the SysTick to trigger an IRQ with auto-reload, using HCLK/1 as
- * its clock source
- */
-static void systick_init( void )
+void uip_log( char *msg )
 {
-	// Reset any pre-existing configuration
-	SysTick->CTLR = 0x0000;
-
-	// Set the SysTick Compare Register to trigger in 1 millisecond
-	SysTick->CMP = SysTick->CNT + SYSTICK_ONE_MILLISECOND;
-
-	SysTick_Ms = 0x00000000;
-
-	// Set the SysTick Configuration
-	// NOTE: By not setting SYSTICK_CTLR_STRE, we maintain compatibility with
-	// busywait delay funtions used by ch32v003_fun.
-	SysTick->CTLR |= SYSTICK_CTLR_STE | // Enable Counter
-	                 SYSTICK_CTLR_STIE | // Enable Interrupts
-	                 SYSTICK_CTLR_STCLK; // Set Clock Source to HCLK/1
-
-	// Enable the SysTick IRQ
-	NVIC_EnableIRQ( SysTicK_IRQn );
-}
-
-/*
- * SysTick ISR - must be lightweight to prevent the CPU from bogging down.
- * Increments Compare Register and systick_millis when triggered (every 1ms)
- * NOTE: the `__attribute__((interrupt))` attribute is very important
- */
-void SysTick_Handler( void ) __attribute__( ( interrupt ) );
-void SysTick_Handler( void )
-{
-	// Set the SysTick Compare Register to trigger in 1 millisecond
-	SysTick->CMP = SysTick->CNT + SYSTICK_ONE_MILLISECOND;
-
-	// Clear the trigger state for the next IRQ
-	SysTick->SR = 0x00000000;
-
-	// Increment the milliseconds count
-	SysTick_Ms++;
+	if ( debugger ) printf( "uIP: %s\n", msg );
 }
 
 int HandleInRequest( struct _USBState *ctx, int endp, uint8_t *data, int len )
@@ -304,12 +255,6 @@ void HandleDataOut( struct _USBState *ctx, int endp, uint8_t *data, int len )
 	}
 	if ( endp == EP_RECV )
 	{
-#if 0
-		if ( debugger )
-		{
-			printf( "RECV len: %d\n", len );
-		}
-#else
 		// TODO: NAK doesn't work????
 		if ( busy )
 		{
@@ -326,11 +271,8 @@ void HandleDataOut( struct _USBState *ctx, int endp, uint8_t *data, int len )
 			return;
 		}
 
-#if 0
-		USBFS->UEP2_DMA = (uint32_t)( buff + buff_len );
-#else
 		memcpy( (void *)( buff + buff_len ), (void *)data, len );
-#endif
+
 		buff_len += len;
 		if ( len < 64 )
 		{
@@ -339,7 +281,6 @@ void HandleDataOut( struct _USBState *ctx, int endp, uint8_t *data, int len )
 		}
 		// USBFS_SendACK( EP_RECV, 0 );
 		ctx->USBFS_SetupReqLen = 0; // To ACK
-#endif
 	}
 }
 
@@ -402,17 +343,26 @@ static size_t ethdev_read( void )
 
 static void ethdev_send( void )
 {
+	static uint8_t usb_buf[UIP_BUFSIZE];
+
+	memcpy( usb_buf, uip_buf, 40 + UIP_LLH_LEN );
+	const size_t offset = 40 + UIP_LLH_LEN;
+	if ( uip_len > offset )
+	{
+		memcpy( &usb_buf[offset], uip_appdata, uip_len - offset );
+	}
+
 	if ( debugger )
 	{
 		printf( "ethdev_send: uip_len=%d\n", (int)uip_len );
-		hexdump( (const void *)uip_buf, uip_len );
+		// hexdump( (const void *)usb_buf, uip_len );
 	}
 
 	size_t remaining = uip_len;
 	while ( remaining )
 	{
 		const size_t len = ( remaining > 64 ) ? 64 : remaining;
-		uint8_t *buf = &uip_buf[uip_len - remaining];
+		uint8_t *buf = &usb_buf[uip_len - remaining];
 		remaining -= len;
 
 		// TODO: do I need to copy the last packet
@@ -431,7 +381,68 @@ static void ethdev_send( void )
 	}
 }
 
-void uip_log( char *msg )
+/*
+ * Initialises the SysTick to trigger an IRQ with auto-reload, using HCLK/1 as
+ * its clock source
+ */
+static void systick_init( void )
 {
-	if ( debugger ) printf( "uIP: %s\n", msg );
+	// Reset any pre-existing configuration
+	SysTick->CTLR = 0x0000;
+
+	// Set the SysTick Compare Register to trigger in 1 millisecond
+	SysTick->CMP = SysTick->CNT + SYSTICK_ONE_MILLISECOND;
+
+	SysTick_Ms = 0x00000000;
+
+	// Set the SysTick Configuration
+	// NOTE: By not setting SYSTICK_CTLR_STRE, we maintain compatibility with
+	// busywait delay funtions used by ch32v003_fun.
+	SysTick->CTLR |= SYSTICK_CTLR_STE | // Enable Counter
+	                 SYSTICK_CTLR_STIE | // Enable Interrupts
+	                 SYSTICK_CTLR_STCLK; // Set Clock Source to HCLK/1
+
+	// Enable the SysTick IRQ
+	NVIC_EnableIRQ( SysTicK_IRQn );
+}
+
+/*
+ * SysTick ISR - must be lightweight to prevent the CPU from bogging down.
+ * Increments Compare Register and systick_millis when triggered (every 1ms)
+ * NOTE: the `__attribute__((interrupt))` attribute is very important
+ */
+void SysTick_Handler( void ) __attribute__( ( interrupt ) );
+void SysTick_Handler( void )
+{
+	// Set the SysTick Compare Register to trigger in 1 millisecond
+	SysTick->CMP = SysTick->CNT + SYSTICK_ONE_MILLISECOND;
+
+	// Clear the trigger state for the next IRQ
+	SysTick->SR = 0x00000000;
+
+	// Increment the milliseconds count
+	SysTick_Ms++;
+}
+
+static void hexdump( const void *ptr, size_t len )
+{
+	const uint8_t *b = (const uint8_t *)ptr;
+	for ( size_t i = 0; i < len; i++ )
+	{
+		if ( ( i & 0x0f ) == 0 ) printf( "\n%04x: ", (unsigned int)i );
+		printf( "%02x ", b[i] );
+	}
+	printf( "\n" );
+}
+
+static int uip_get_ip( u16_t addr[2], int index )
+{
+	switch ( index )
+	{
+		case 0: return addr[0] & 0xff;
+		case 1: return addr[0] >> 8;
+		case 2: return addr[1] & 0xff;
+		case 3: return addr[1] >> 8;
+	}
+	return 0;
 }
