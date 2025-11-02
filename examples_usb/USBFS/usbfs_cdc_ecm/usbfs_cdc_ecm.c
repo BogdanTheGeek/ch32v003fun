@@ -10,7 +10,11 @@
 #include "dhcpd.h"
 #include "httpd.h"
 
-#define DHCPD_ENABLE 0
+#define DHCPD_ENABLE 1
+// Logs
+#define HEXDUMP_ENABLE 0
+#define ARPDEBUG_ENABLE 0
+#define USBSTATS_ENABLE 0
 
 #define BUF ( (struct uip_eth_hdr *)&uip_buf[0] )
 
@@ -69,27 +73,30 @@ static size_t ethdev_read( void );
 static void ethdev_send( void );
 
 static void systick_init( void );
-static void hexdump( const void *ptr, size_t len );
 static int uip_get_ip( u16_t addr[2], int index );
+
+#if HEXDUMP_ENABLE
+static void hexdump( const void *ptr, size_t len );
+#endif
 
 int main()
 {
 	SystemInit();
 	RCC->AHBPCENR = RCC_AHBPeriph_SRAM | RCC_AHBPeriph_DMA1;
 
-	printf( "Starting %dMHz\n", FUNCONF_SYSTEM_CORE_CLOCK / 1000000 );
 	systick_init();
 
 	funGpioInitAll();
 	debugger = !WaitForDebuggerToAttach( 1000 );
 
+	if ( debugger ) printf( "Starting %dMHz\n", FUNCONF_SYSTEM_CORE_CLOCK / 1000000 );
 	usb_debug = 0;
 
 	USBFSSetup();
 
 	ethdev_init();
 
-	printf( "Started USB CDC ECM + uIP HTTPD example\n" );
+	if ( debugger ) printf( "Started USB CDC ECM + uIP HTTPD example\n" );
 
 	uip_init();
 	httpd_init();
@@ -104,10 +111,6 @@ int main()
 
 #if DHCPD_ENABLE && UIP_UDP
 	dhcpd_init();
-	uip_ipaddr( ipaddr, 255, 255, 255, 255 );
-	uip_sethostaddr( ipaddr );
-	uip_ipaddr( ipaddr, 0, 0, 0, 0 );
-	uip_setdraddr( ipaddr );
 #else
 	uip_ipaddr( ipaddr, 192, 168, 8, 111 );
 	uip_sethostaddr( ipaddr );
@@ -138,10 +141,12 @@ int main()
 			if ( BUF->type == htons( UIP_ETHTYPE_IP ) )
 			{
 				uip_tcpip_hdr *hdr = (uip_tcpip_hdr *)&uip_buf[UIP_LLH_LEN];
-				printf( "IP (%d): %d.%d.%d.%d -> %d.%d.%d.%d\n", uip_len, uip_get_ip( hdr->srcipaddr, 0 ),
-					uip_get_ip( hdr->srcipaddr, 1 ), uip_get_ip( hdr->srcipaddr, 2 ), uip_get_ip( hdr->srcipaddr, 3 ),
-					uip_get_ip( hdr->destipaddr, 0 ), uip_get_ip( hdr->destipaddr, 1 ),
-					uip_get_ip( hdr->destipaddr, 2 ), uip_get_ip( hdr->destipaddr, 3 ) );
+				if ( debugger )
+					printf( "IP (%d): %d.%d.%d.%d -> %d.%d.%d.%d\n", uip_len, uip_get_ip( hdr->srcipaddr, 0 ),
+						uip_get_ip( hdr->srcipaddr, 1 ), uip_get_ip( hdr->srcipaddr, 2 ),
+						uip_get_ip( hdr->srcipaddr, 3 ), uip_get_ip( hdr->destipaddr, 0 ),
+						uip_get_ip( hdr->destipaddr, 1 ), uip_get_ip( hdr->destipaddr, 2 ),
+						uip_get_ip( hdr->destipaddr, 3 ) );
 
 				uip_arp_ipin();
 				uip_input();
@@ -156,11 +161,12 @@ int main()
 			}
 			else if ( BUF->type == htons( UIP_ETHTYPE_ARP ) )
 			{
-#if 0
-				printf( "ARP (%d): %02x:%02x:%02x:%02x:%02x:%02x -> %02x:%02x:%02x:%02x:%02x:%02x\n", uip_len,
-					BUF->src.addr[0], BUF->src.addr[1], BUF->src.addr[2], BUF->src.addr[3], BUF->src.addr[4],
-					BUF->src.addr[5], BUF->dest.addr[0], BUF->dest.addr[1], BUF->dest.addr[2], BUF->dest.addr[3],
-					BUF->dest.addr[4], BUF->dest.addr[5] );
+#if ARPDEBUG_ENABLE
+				if ( debugger )
+					printf( "ARP (%d): %02x:%02x:%02x:%02x:%02x:%02x -> %02x:%02x:%02x:%02x:%02x:%02x\n", uip_len,
+						BUF->src.addr[0], BUF->src.addr[1], BUF->src.addr[2], BUF->src.addr[3], BUF->src.addr[4],
+						BUF->src.addr[5], BUF->dest.addr[0], BUF->dest.addr[1], BUF->dest.addr[2], BUF->dest.addr[3],
+						BUF->dest.addr[4], BUF->dest.addr[5] );
 #endif
 				uip_arp_arpin();
 				/* If the above function invocation resulted in data that
@@ -204,12 +210,13 @@ int main()
 			}
 #endif /* UIP_UDP */
 
-#if 0
+#if USBSTATS_ENABLE
 			if ( ( arptimer & 0b11 ) == 2 )
 			{
-				printf( "%ld:\tUSB Stats: EP0 %d/%d EP1 %d/%d EP2 %d/%d EP3 %d/%d\n", SysTick_Ms, usb_stats.in[0],
-					usb_stats.out[0], usb_stats.in[1], usb_stats.out[1], usb_stats.in[2], usb_stats.out[2],
-					usb_stats.in[3], usb_stats.out[3] );
+				if ( debugger )
+					printf( "%ld:\tUSB Stats: EP0 %d/%d EP1 %d/%d EP2 %d/%d EP3 %d/%d\n", SysTick_Ms, usb_stats.in[0],
+						usb_stats.out[0], usb_stats.in[1], usb_stats.out[1], usb_stats.in[2], usb_stats.out[2],
+						usb_stats.in[3], usb_stats.out[3] );
 			}
 #endif
 
@@ -313,7 +320,7 @@ int HandleSetupCustom( struct _USBState *ctx, int setup_code )
 
 static void ethdev_init( void )
 {
-	printf( "ethdev_init\n" );
+	if ( debugger ) printf( "ethdev_init\n" );
 	// Wait for USB enumeration
 	while ( 1 )
 	{
@@ -326,7 +333,7 @@ static void ethdev_init( void )
 		}
 	}
 	Delay_Ms( 100 );
-	printf( "ethdev_init done\n" );
+	if ( debugger ) printf( "ethdev_init done\n" );
 }
 
 static size_t ethdev_read( void )
@@ -349,13 +356,15 @@ static void ethdev_send( void )
 	const size_t offset = 40 + UIP_LLH_LEN;
 	if ( uip_len > offset )
 	{
-		memcpy( &usb_buf[offset], uip_appdata, uip_len - offset );
+		memcpy( &usb_buf[offset], (void *)uip_appdata, uip_len - offset );
 	}
 
 	if ( debugger )
 	{
 		printf( "ethdev_send: uip_len=%d\n", (int)uip_len );
-		// hexdump( (const void *)usb_buf, uip_len );
+#if HEXDUMP_ENABLE
+		hexdump( (const void *)usb_buf, uip_len );
+#endif
 	}
 
 	size_t remaining = uip_len;
@@ -424,7 +433,8 @@ void SysTick_Handler( void )
 	SysTick_Ms++;
 }
 
-static void hexdump( const void *ptr, size_t len )
+#if HEXDUMP_ENABLE
+static inline void hexdump( const void *ptr, size_t len )
 {
 	const uint8_t *b = (const uint8_t *)ptr;
 	for ( size_t i = 0; i < len; i++ )
@@ -434,6 +444,7 @@ static void hexdump( const void *ptr, size_t len )
 	}
 	printf( "\n" );
 }
+#endif
 
 static int uip_get_ip( u16_t addr[2], int index )
 {
