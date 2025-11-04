@@ -281,7 +281,10 @@ typedef uint16_t uip_stats_t;
  *
  * \hideinitializer
  */
-// #define UIP_UDP_APPCALL  udp_appcall
+#if UIP_UDP
+extern void udp_appcall(void);
+#define UIP_UDP_APPCALL  udp_appcall
+#endif
 
 /** @} */
 /*------------------------------------------------------------------------------*/
@@ -561,8 +564,9 @@ struct httpd_state {
 #include "httpd.h"
 
 #if UIP_UDP
-#include "dhcpd.h"
-#endif /* UIP_UDP */
-
+#define DHCPD_ENABLE 1
+#define DHCP_CAPTIVE_PORTAL_ENABLE 1
+#define DNS_ENABLE 1
+#endif
 
 #endif /* __UIPOPT_H__ */

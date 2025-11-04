@@ -97,7 +97,7 @@ i /footer.plain
 #define HTTP_TEXT         2
 #define HTTP_FUNC         3
 
-#ifdef DEBUG
+#if DEBUG
 #include <stdio.h>
 #define PRINT(x) printf("%s", x)
 #define PRINTLN(x) printf("%s\n", x)
@@ -110,6 +110,15 @@ struct httpd_state *hs;
 
 extern const struct fsdata_file file_index_html;
 extern const struct fsdata_file file_404_html;
+
+__attribute__((weak))
+int uip_api_handler(const char *endpoint, char **data, int *len)
+{
+   (void)endpoint;
+   (void)data;
+   (void)len;
+   return 0;
+}
 
 /*-----------------------------------------------------------------------------------*/
 /**
@@ -179,6 +188,40 @@ httpd_appcall(void)
           uip_abort();
           return;
        }
+
+       // check if host is captive portal
+       char *c = (char *)uip_appdata;
+       const char *end = (char *)uip_appdata + uip_len;
+       while(c + 5 < end)
+       {
+         if((*c == 'H' || *c == 'h') &&
+            (*(c + 1) == 'o' || *(c + 1) == 'O') &&
+            (*(c + 2) == 's' || *(c + 2) == 'S') &&
+            (*(c + 3) == 't' || *(c + 3) == 'T') &&
+            (*(c + 4) == ':'))
+         {
+           c += 6; // skip "Host: "
+           // check if host is not an IP address
+           if((*c < '0' || *c > '9') &&
+              *c != '[') // IPv6 start
+           {
+             PRINTLN("Captive portal redirect");
+             // serve captive portal page
+             static const char captive_portal_html[] =
+               "HTTP/1.0 302 Found\r\n"
+               "Location: http://172.16.42.1/\r\n"
+               "Content-Length: 0\r\n"
+               "Connection: close\r\n"
+               "\r\n";
+             hs->script = NULL;
+             hs->state = HTTP_FILE;
+             hs->dataptr = (char *)captive_portal_html;
+             hs->count = sizeof(captive_portal_html) - 1;
+             goto redirect;
+           }
+         }
+         ++c;
+       }
 	       
       /* Find the file we are looking for. */
       for(i = 4; i < 40; ++i) {
@@ -199,6 +242,17 @@ httpd_appcall(void)
          uip_appdata[5] == 0)
       {
          fs_open(file_index_html.name, &fsfile);    
+      } else if(uip_appdata[4] == '/' &&
+                uip_appdata[5] == 'a' &&
+                uip_appdata[6] == 'p' &&
+                uip_appdata[7] == 'i' &&
+                uip_appdata[8] == '/' )
+      {
+         if(!uip_api_handler((char *)&uip_appdata[9], &fsfile.data, &fsfile.len))
+         {
+            PRINTLN("API handler failed");
+            fs_open(file_404_html.name, &fsfile);
+         }
       } else {
          if(!fs_open((const char *)&uip_appdata[4], &fsfile)) {
             PRINTLN("couldn't open file");
@@ -216,6 +270,7 @@ httpd_appcall(void)
          the first byte of the file. */
       hs->dataptr = fsfile.data;
       hs->count = fsfile.len;	
+redirect:
     }
 
     

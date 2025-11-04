@@ -5,15 +5,17 @@
 #include "fsusb.h"
 
 #include "uip.h"
+#include "uipopt.h"
 #include "uip_arp.h"
 
 #include "dhcpd.h"
+#include "dns.h"
 #include "httpd.h"
 
-#define DHCPD_ENABLE 1
 // Logs
 #define HEXDUMP_ENABLE 0
 #define ARPDEBUG_ENABLE 0
+#define IPDEBUG_ENABLE 0
 #define USBSTATS_ENABLE 0
 
 #define BUF ( (struct uip_eth_hdr *)&uip_buf[0] )
@@ -35,6 +37,10 @@
 
 #define USB_ACK -1
 #define USB_NAK 0
+
+#define IP_FMT "%d.%d.%d.%d"
+#define IP_FMT_ARGS( addr ) \
+	( addr )[0] & 0xff, ( ( addr )[0] >> 8 ) & 0xff, ( addr )[1] & 0xff, ( ( addr )[1] >> 8 ) & 0xff
 
 typedef struct __attribute__( ( packed ) )
 {
@@ -73,7 +79,6 @@ static size_t ethdev_read( void );
 static void ethdev_send( void );
 
 static void systick_init( void );
-static int uip_get_ip( u16_t addr[2], int index );
 
 #if HEXDUMP_ENABLE
 static void hexdump( const void *ptr, size_t len );
@@ -109,13 +114,18 @@ int main()
 	uip_ipaddr( ipaddr, 255, 255, 255, 0 );
 	uip_setnetmask( ipaddr );
 
-#if DHCPD_ENABLE && UIP_UDP
+#if DHCPD_ENABLE
 	dhcpd_init();
 #else
+	dns_init();
 	uip_ipaddr( ipaddr, 192, 168, 8, 111 );
 	uip_sethostaddr( ipaddr );
 	uip_ipaddr( ipaddr, 192, 168, 8, 1 );
 	uip_setdraddr( ipaddr );
+#endif
+
+#if DNS_ENABLE
+	dns_init();
 #endif
 
 	uint32_t last_ms = SysTick_Ms;
@@ -140,13 +150,12 @@ int main()
 		{
 			if ( BUF->type == htons( UIP_ETHTYPE_IP ) )
 			{
+#if IPDEBUG_ENABLE
 				uip_tcpip_hdr *hdr = (uip_tcpip_hdr *)&uip_buf[UIP_LLH_LEN];
 				if ( debugger )
-					printf( "IP (%d): %d.%d.%d.%d -> %d.%d.%d.%d\n", uip_len, uip_get_ip( hdr->srcipaddr, 0 ),
-						uip_get_ip( hdr->srcipaddr, 1 ), uip_get_ip( hdr->srcipaddr, 2 ),
-						uip_get_ip( hdr->srcipaddr, 3 ), uip_get_ip( hdr->destipaddr, 0 ),
-						uip_get_ip( hdr->destipaddr, 1 ), uip_get_ip( hdr->destipaddr, 2 ),
-						uip_get_ip( hdr->destipaddr, 3 ) );
+					printf( "IP (%d): " IP_FMT " -> " IP_FMT "\n", uip_len, IP_FMT_ARGS( hdr->srcipaddr ),
+						IP_FMT_ARGS( hdr->destipaddr ) );
+#endif
 
 				uip_arp_ipin();
 				uip_input();
@@ -228,6 +237,35 @@ int main()
 			}
 		}
 	}
+}
+
+#define API_HEADER "HTTP/1.0 200 OK\r\nServer: uIP/0.9\r\nContent-type: application/json\r\n\r\n"
+
+int uip_api_handler( const char *endpoint, char **data, int *len )
+{
+	static char responseBuffer[256] = API_HEADER;
+
+	static char *const payloadStart = responseBuffer + sizeof( API_HEADER ) - 1;
+	static const size_t payloadCapacity = sizeof( responseBuffer ) - sizeof( API_HEADER );
+
+	if ( strcmp( endpoint, "status" ) == 0 )
+	{
+		const int ret = snprintf( payloadStart, payloadCapacity, "{\"uptime_ms\": %lu}\r\n", SysTick_Ms );
+		*data = responseBuffer;
+		*len = ( ret > 0 ) ? ret + sizeof( API_HEADER ) - 1 : 0;
+		return 1;
+	}
+	return 0;
+}
+
+void udp_appcall( void )
+{
+#if DHCPD_ENABLE
+	dhcpd_udp_appcall();
+#endif
+#if DNS_ENABLE
+	dns_udp_appcall();
+#endif
 }
 
 void uip_log( char *msg )
@@ -340,7 +378,7 @@ static size_t ethdev_read( void )
 {
 	if ( !busy ) return 0;
 
-	if ( debugger ) printf( "ethdev_read: buff_len=%d\n", (int)buff_len );
+	if ( debugger && 0 ) printf( "ethdev_read: buff_len=%d\n", (int)buff_len );
 	const size_t len = buff_len;
 	memcpy( (void *)uip_buf, (void *)buff, len );
 	buff_len = 0;
@@ -352,15 +390,15 @@ static void ethdev_send( void )
 {
 	const size_t offset = 40 + UIP_LLH_LEN;
 
-   // NOTE: uIP 0.9 doesn't place appdata in contiguous buffer to avoid copy on slip devices
-   // However, for USB CDC ECM, we need a contiguous buffer
+	// NOTE: uIP 0.9 doesn't place appdata in contiguous buffer to avoid copy on slip devices
+	// However, for USB CDC ECM, we need a contiguous buffer
 	if ( ( uip_len > offset ) && ( uip_appdata != &uip_buf[offset] ) )
 	{
 		// Need to copy appdata into contiguous buffer
 		memcpy( &uip_buf[offset], (void *)uip_appdata, uip_len - offset );
 	}
 
-	if ( debugger )
+	if ( debugger && 0 )
 	{
 		printf( "ethdev_send: uip_len=%d\n", (int)uip_len );
 #if HEXDUMP_ENABLE
@@ -446,15 +484,3 @@ static inline void hexdump( const void *ptr, size_t len )
 	printf( "\n" );
 }
 #endif
-
-static int uip_get_ip( u16_t addr[2], int index )
-{
-	switch ( index )
-	{
-		case 0: return addr[0] & 0xff;
-		case 1: return addr[0] >> 8;
-		case 2: return addr[1] & 0xff;
-		case 3: return addr[1] >> 8;
-	}
-	return 0;
-}

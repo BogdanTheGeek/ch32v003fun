@@ -809,8 +809,12 @@ broadcast:
   }
 #endif /* UIP_UDP_CHECKSUMS */
 
+  if(uip_udp_conn->rport == 0) {
+    BUF->destport = UDPBUF->srcport;
+  } else {
+    BUF->destport = uip_udp_conn->rport;
+  }
   BUF->srcport  = uip_udp_conn->lport;
-  BUF->destport = uip_udp_conn->rport;
 
   BUF->srcipaddr[0] = uip_hostaddr[0];
   BUF->srcipaddr[1] = uip_hostaddr[1];

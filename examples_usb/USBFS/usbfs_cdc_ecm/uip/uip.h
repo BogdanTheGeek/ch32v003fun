@@ -633,6 +633,8 @@ struct uip_conn *uip_connect(u16_t *ripaddr, u16_t port);
  */
 struct uip_udp_conn *uip_udp_new(u16_t *ripaddr, u16_t rport);
 
+#define uip_udp_bind( conn, port ) ( conn )->lport = port
+
 /**
  * Removed a UDP connection.
  *

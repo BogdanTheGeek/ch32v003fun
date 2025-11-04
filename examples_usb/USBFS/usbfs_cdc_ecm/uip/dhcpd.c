@@ -8,7 +8,14 @@
 
 #include "dhcpd.h"
 
+#ifndef DHCP_LOG_ENABLE
 #define DHCP_LOG_ENABLE 0
+#endif
+
+#ifndef DHCP_CAPTIVE_PORTAL_ENABLE
+// this doesn't work yet
+#define DHCP_CAPTIVE_PORTAL_ENABLE 0
+#endif
 
 #if DHCP_LOG_ENABLE
 #include <stdio.h>
@@ -19,8 +26,6 @@
 
 #define DHCP_SERVER_PORT 67
 #define DHCP_CLIENT_PORT 68
-#define DHCP_SERVER_IP_BYTES 172, 16, 42, 1
-#define DHCP_CLIENT_IP_BYTES 172, 16, 42, 2
 
 // Bootp message types
 #define BOOTREQUEST 1
@@ -41,6 +46,7 @@
 #define DHCP_OPTION_ROUTER 3
 #define DHCP_OPTION_DNS 6
 #define DHCP_OPTION_LEASE 51
+#define DHCP_OPTION_CAPTIVE_PORTAL 114
 #define DHCP_OPTION_END 255
 
 #define DHCP_HEADER_SIZE 236
@@ -51,8 +57,8 @@
 #define DHCP_MESSAGE_SIZE_MAX 576
 #define DHCP_RESPONSE_SIZE ( DHCP_HEADER_SIZE + sizeof( dhcp_response_options_t ) )
 
-static const uint8_t host[4] = { DHCP_SERVER_IP_BYTES };
-static const uint8_t client[4] = { DHCP_CLIENT_IP_BYTES };
+const uint8_t host[4] = { DHCP_SERVER_IP_BYTES };
+const uint8_t client[4] = { DHCP_CLIENT_IP_BYTES };
 static const uint8_t dhcp_option_magic[4] = { 0x63, 0x82, 0x53, 0x63 };
 
 // From: https://datatracker.ietf.org/doc/html/rfc2131#page-37
@@ -72,10 +78,13 @@ typedef struct
 	uint8_t chaddr[16];
 	uint32_t sname[16];
 	uint32_t file[32];
-	uint8_t options[]; // zero size pointer
+	uint8_t options[0]; // zero size pointer
 } dhcp_message_t;
 
 static_assert( sizeof( dhcp_message_t ) == DHCP_HEADER_SIZE, "dhcp_message_t size incorrect" );
+#if DHCP_CAPTIVE_PORTAL_ENABLE
+#define CAPTIVE_PORTAL_URL "http://XXX.XXX.XXX.XXX/index.html"
+#endif
 
 typedef struct
 {
@@ -100,6 +109,17 @@ typedef struct
 	uint8_t lease_option;
 	uint8_t lease_len;
 	uint8_t lease_val[4];
+#if DHCP_CAPTIVE_PORTAL_ENABLE
+	uint8_t captive_portal_option;
+	uint8_t captive_portal_len;
+	char captive_portal_val[sizeof( CAPTIVE_PORTAL_URL ) - 1];
+	uint8_t router_option;
+	uint8_t router_len;
+	uint8_t router_val[4];
+	uint8_t dns_option;
+	uint8_t dns_len;
+	uint8_t dns_val[4];
+#endif
 	uint8_t end_option;
 } dhcp_response_options_t;
 
@@ -155,6 +175,7 @@ static int dhcp_create_response( dhcp_message_t *response, unsigned char type )
 
 	memcpy( &response->yiaddr, client, sizeof( response->yiaddr ) );
 
+
 	dhcp_response_options_t *options = (dhcp_response_options_t *)&response->options;
 	*options = ( dhcp_response_options_t ){
 		.magic = { 0x63, 0x82, 0x53, 0x63 },
@@ -169,9 +190,23 @@ static int dhcp_create_response( dhcp_message_t *response, unsigned char type )
 		.lease_len = 4,
 		.lease_val = { 0x00, 0x37, 0x5f, 0x00 }, // 42 days in second
 		.server_id_val = { DHCP_SERVER_IP_BYTES },
-		.subnet_val = { 255, 255, 255, 0 },
+      .subnet_val = { 255, 255, 255, 0 },
+#if DHCP_CAPTIVE_PORTAL_ENABLE
+		.captive_portal_option = DHCP_OPTION_CAPTIVE_PORTAL,
+      .router_option = DHCP_OPTION_ROUTER,
+      .router_len = 4,
+		.router_val = { DHCP_SERVER_IP_BYTES },
+      .dns_option = DHCP_OPTION_DNS,
+      .dns_len = 4,
+		.dns_val = { DHCP_SERVER_IP_BYTES },
+#endif
 		.end_option = DHCP_OPTION_END,
 	};
+
+#if DHCP_CAPTIVE_PORTAL_ENABLE
+	options->captive_portal_len = snprintf( options->captive_portal_val, sizeof( CAPTIVE_PORTAL_URL ) - 1,
+		"http://%d.%d.%d.%d/index.html", DHCP_SERVER_IP_BYTES );
+#endif
 
 	return 0;
 }
@@ -194,11 +229,6 @@ static int dhcp_is_request_valid( const dhcp_message_t *request, int request_len
 	return 1;
 }
 
-
-#ifndef uip_udp_bind
-#define uip_udp_bind( conn, port ) ( conn )->lport = port
-#endif
-
 int dhcpd_init( void )
 {
 	DHCP_LOG( "dhcpd_init: server ip %d.%d.%d.%d\n", host[0], host[1], host[2], host[3] );
@@ -215,7 +245,7 @@ int dhcpd_init( void )
 	DHCP_LOG( "dhcpd_init: bind dhcp server port %d\n", DHCP_SERVER_PORT );
 	uip_udp_bind( conn, HTONS( DHCP_SERVER_PORT ) );
 
-   return 0;
+	return 0;
 }
 
 void dhcpd_udp_appcall( void )
