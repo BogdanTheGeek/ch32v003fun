@@ -53,6 +53,8 @@ typedef enum
 	SCAN_RSP = 0x04,
 	CONNECT_REQ = 0x05,
 	ADV_SCAN_IND = 0x06,
+   AUX_EXT_IND = 0x07,
+   AUX_CONNNECT_RSP = 0x08,
    PD_MAX
 } PD_t;
 
@@ -103,6 +105,8 @@ const char * pdu_toString(uint8_t pdu) {
       case SCAN_RSP: return CYN"SCAN_RSP"RST;
       case CONNECT_REQ: return YEL"CONNECT_REQ"RST;
       case ADV_SCAN_IND: return GRN"ADV_SCAN_IND"RST;
+      case AUX_EXT_IND: return BLU"AUX_EXT_IND"RST;
+      case AUX_CONNNECT_RSP: return YEL"AUX_CONNNECT_RSP"RST;
       default: return RED"UNKNOWN"RST;
    }
 }
@@ -126,12 +130,35 @@ void print_scan_req(uint8_t *frame, uint8_t len) {
    logf("\r\n");
 }
 
+
+uint8_t flip(uint8_t val)
+{
+   uint8_t res = 0;
+   for (int i = 0; i < 8; i++) {
+      res |= (val & 1);
+      res <<= 1;
+      val >>= 1;
+   }
+   return res;
+}
+
 void incoming_frame_handler()
 {
 	uint8_t *frame = (uint8_t *)LLE_BUF;
 
-	const uint8_t pdu = frame[0] & 0x0f;
+	const uint8_t pdu = frame[0] & 0xF;
 	const uint8_t len = frame[1];
+
+	const uint8_t raw = flip(frame[0]);
+	const uint8_t pduf = raw & 0x0F;
+	const uint8_t lenf = flip(frame[1]);
+
+
+   logf( "\n[0]:0x%02x\tPDU   : %d (%s)", frame[0], pdu, pdu_toString(pdu) );
+   logf( "\n[0]:0x%02x\tPDUf  : %d (%s)", raw, pduf, pdu_toString(pduf) );
+   logf( "\n[1]:0x%02x\tLEN   : %d\tLENF: %d", frame[1], len , lenf );
+   // hexdump(frame, len + 2);
+   return;
 
    // if (pdu != SCAN_REQ) return;
 
