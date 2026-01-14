@@ -8,7 +8,9 @@
 #include "ch32fun.h"
 
 
+#ifndef __HIGH_CODE
 #define __HIGH_CODE
+#endif
 
 #include "iSLER.h"
 #include <stdio.h>
@@ -76,6 +78,7 @@ void incoming_frame_handler()
 	const uint8_t pdu = bleh_get_pdu( frame );
 	const uint8_t len = bleh_get_len( frame );
 	// const int rssi = iSLERRSSI();
+	void *data = &frame[2];
 
 	if ( len > 37 )
 	{
@@ -92,11 +95,11 @@ void incoming_frame_handler()
 	{
 		case SCAN_REQ:
 		{
-			BLEH_Adv_ScanReq_t *req = (BLEH_Adv_ScanReq_t *)( frame + 2 );
-			// if (memcmp( req->advertiser.mac, me.mac, sizeof( BLEH_MAC_t ) ) == 0 )
+			BLEH_Adv_ScanReq_t *req = data;
 			if ( bleh_for_me( req, me.mac ) )
 			{
 				// respond with a scan response
+				iSLERTX( ACCESS_ADDRESS, scan_rsp, sizeof( scan_rsp ), 37, PHY_MODE );
 				iSLERTX( ACCESS_ADDRESS, scan_rsp, sizeof( scan_rsp ), 37, PHY_MODE );
 			}
 			// static const uint8_t filter[6] = { 0xb0, 0xec, 0xa7, 0x55, 0xd4, 0x6b};
@@ -105,10 +108,14 @@ void incoming_frame_handler()
 			// 	bleh_print( frame );
 			// }
 		}
-		case SCAN_REQ | 0xff:
+		break;
+		case CONNECT_REQ:
 		{
-			iSLERTX( ACCESS_ADDRESS, scan_rsp, sizeof( scan_rsp ), 37, PHY_MODE );
-			// bleh_print( frame );
+			BLEH_Adv_ConnectReq_t *req = data;
+			if ( bleh_for_me( req, me.mac ) )
+			{
+				bleh_print( frame );
+			}
 		}
 		break;
 	}

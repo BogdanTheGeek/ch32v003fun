@@ -90,7 +90,7 @@ typedef struct PACKED
 	uint16_t timeout;
 	uint8_t chan_map[5];
 	uint8_t hop_sca;
-} BLEH_Adv_ConnectReq_Data_t;
+} BLEH_Adv_ConnectReq_t;
 
 
 uint8_t adv_channels[] = { 37, 38, 39 };
@@ -175,8 +175,9 @@ void bleh_print( uint8_t *frame )
 		break;
 		case CONNECT_REQ:
 		{
-			BLEH_Adv_ConnectReq_Data_t *connect_req = data;
+			BLEH_Adv_ConnectReq_t *connect_req = data;
 			logf( CONNECT_REQ_FMT, CONNECT_REQ_ARGS( connect_req ) );
+			hexdump( &frame[0], len + 2 );
 		}
 		break;
 		default:
