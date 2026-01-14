@@ -838,7 +838,7 @@ void iSLERTX(uint32_t access_address, uint8_t adv[], size_t len, uint8_t channel
 #if !defined(CH571_CH573)
 	LL->STATUS = LL_STATUS_TX;
 #endif
-	LL->TMR = (uint32_t)(len *512); // needs optimisation, per phy mode
+	LL->TMR = (uint32_t)(len *32); // needs optimisation, per phy mode
 
 	BB->CTRL_CFG |= CTRL_CFG_START_TX;
 	BB->CTRL_TX &= 0xfffffffc;
