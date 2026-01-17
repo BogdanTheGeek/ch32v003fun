@@ -331,6 +331,7 @@ volatile uint32_t tuneFilter2M;
 volatile uint32_t rx_ready;
 #endif
 
+volatile uint32_t rx_timestamp = 0;
 
 #ifdef CH571_CH573
 __attribute__((interrupt))
@@ -384,6 +385,7 @@ void LLE_IRQHandler() {
 		ISLER_CALLBACK();
 #else
 		rx_ready = 1;
+      rx_timestamp = (uint32_t)SysTick->CNT;
 #endif
 	}
 }
@@ -911,6 +913,104 @@ void iSLERRX(uint32_t access_address, uint8_t channel, uint8_t phy_mode) {
 	BB->CRCPOLY1 = (BB->CRCPOLY1 & 0xff000000) | 0x80032d; // crc poly
 	BB->CRCPOLY2 = (BB->CRCPOLY2 & 0xff000000) | 0x80032d;
 #endif
+
+	LL->LL0 = 1; // Not sure what this does, but on TX it's 2
+#ifndef ISLER_CALLBACK
+	rx_ready = 0;
+#endif
+}
+
+
+///////////////// BOGDAN's ADDITIONS ///////////////////
+
+void isler_config(uint32_t access_address, uint32_t crc_init, uint8_t phy_mode ) {
+
+
+	BB->ACCESSADDRESS1 = access_address; // access address
+	BB->CRCINIT1 = 0x555555; // crc init
+#ifdef CH570_CH572
+	BB->ACCESSADDRESS2 = access_address;
+	BB->CRCINIT2 = 0x555555;
+	BB->CRCPOLY1 = (BB->CRCPOLY1 & 0xff000000) | 0x80032d; // crc poly
+	BB->CRCPOLY2 = (BB->CRCPOLY2 & 0xff000000) | 0x80032d;
+#endif
+
+#if defined(CH582_CH583) || defined(CH32V208)
+	BB->CTRL_CFG = (phy_mode == PHY_2M) ? CTRL_CFG_PHY_2M:
+				   (phy_mode == PHY_S2) ? CTRL_CFG_PHY_CODED:
+				   (phy_mode == PHY_S8) ? CTRL_CFG_PHY_CODED:
+										  CTRL_CFG_PHY_1M; // default 1M for now
+	if(phy_mode > PHY_2M) { // coded phy
+		BB->CTRL_CFG = (BB->CTRL_CFG & 0xffff3fff) | ((phy_mode == PHY_S2) ? 0x4000 : 0);
+	}
+#elif defined(CH571_CH573)
+	BB->CTRL_CFG = CTRL_CFG_PHY_1M; // no 2M PHY on ch571/3
+#else
+	BB->CTRL_CFG = (phy_mode == PHY_2M) ? CTRL_CFG_PHY_2M:
+										  CTRL_CFG_PHY_1M; // default 1M for now
+#endif
+
+#if defined(CH570_CH572)
+	BB->BB9 = (BB->BB9 & 0xf9ffffff) | ((phy_mode == PHY_2M) ? 0 : 0x2000000);
+#endif
+
+#if defined(CH571_CH573)
+	BB->BB11 = (BB->BB11 & 0xfffffffc); // |2 for RX
+#endif
+
+}
+
+void isler_tx(uint8_t adv[], size_t len, uint8_t channel) {
+	BB->CTRL_TX = (BB->CTRL_TX & 0xfffffffc) | 1;
+
+	DevSetChannel(channel);
+	// Uncomment to disable whitening to debug RF.
+	//BB->CTRL_CFG |= (1<<6);
+	DevSetMode(DEVSETMODE_TX);
+
+#if defined(CH571_CH573)
+	DMA->TXBUF = (uint32_t)adv;
+#else
+	LL->TXBUF = (uint32_t)adv;
+#endif
+
+	// Wait for tuning bit to clear.
+	for( int timeout = 3000; !(RF->RF26 & 0x1000000) && timeout >= 0; timeout-- );
+
+
+	// This clears bit 17 (If set, seems to have no impact.)
+	LL->LL4 &= 0xfffdffff;
+
+#if !defined(CH571_CH573)
+	LL->STATUS = LL_STATUS_TX;
+#endif
+	LL->TMR = (uint32_t)(len *32); // needs optimisation, per phy mode
+
+	BB->CTRL_CFG |= CTRL_CFG_START_TX;
+	BB->CTRL_TX &= 0xfffffffc;
+
+	LL->LL0 = 2; // Not sure what this does, but on RX it's 1
+
+	while(LL->TMR); // wait for tx buffer to empty
+#if 0
+	DevSetMode(0);
+	if(LL->LL0 & 3) {
+		LL->CTRL_MOD &= CTRL_MOD_RFSTOP;
+		LL->LL0 |= 0x08;
+	}
+#endif
+}
+
+void isler_rx(uint8_t channel) {
+	DevSetMode(0);
+	if(LL->LL0 & 3) {
+		LL->CTRL_MOD &= CTRL_MOD_RFSTOP;
+		LL->LL0 |= 0x08;
+	}
+	LL->TMR = 0;
+
+	DevSetChannel(channel);
+	DevSetMode(DEVSETMODE_RX);
 
 	LL->LL0 = 1; // Not sure what this does, but on TX it's 2
 #ifndef ISLER_CALLBACK

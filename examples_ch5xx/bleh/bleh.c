@@ -33,6 +33,7 @@
 #include "ble.h"
 
 #define SYSTICK_ONE_MILLISECOND ( (uint32_t)FUNCONF_SYSTEM_CORE_CLOCK / 1000 )
+#define US_TO_TICKS( us ) ( ( us ) * ( FUNCONF_SYSTEM_CORE_CLOCK / 1000000 ) )
 
 static void systick_init( void );
 
@@ -70,8 +71,9 @@ __attribute__( ( aligned( 4 ) ) ) uint8_t adv[] = { 0x02, 0x0d, // header for LL
 #endif
 
 
-void incoming_frame_handler()
+bool incoming_frame_handler( int channel )
 {
+	bool skip = false;
 	// The chip stores the incoming frame in LLE_BUF, defined in extralibs/iSLER.h
 	uint8_t *frame = (uint8_t *)LLE_BUF;
 
@@ -83,7 +85,7 @@ void incoming_frame_handler()
 	if ( len > 37 )
 	{
 		// unsupported length for BLE advertisement
-		return;
+		return skip;
 	}
 
 	// 8c:5a:10:62:87:76
@@ -98,9 +100,15 @@ void incoming_frame_handler()
 			BLEH_Adv_ScanReq_t *req = data;
 			if ( bleh_for_me( req, me.mac ) )
 			{
+#if 1
+				while ( SysTick->CNT - rx_timestamp < US_TO_TICKS( 150 ) )
+				{
+					; // wait 150us
+				}
+#endif
 				// respond with a scan response
-				iSLERTX( ACCESS_ADDRESS, scan_rsp, sizeof( scan_rsp ), 37, PHY_MODE );
-				iSLERTX( ACCESS_ADDRESS, scan_rsp, sizeof( scan_rsp ), 37, PHY_MODE );
+				isler_tx( scan_rsp, sizeof( scan_rsp ), adv_channels[channel] );
+				skip = true;
 			}
 			// static const uint8_t filter[6] = { 0xb0, 0xec, 0xa7, 0x55, 0xd4, 0x6b};
 			// if ( memcmp( req->initiator.mac, filter, sizeof( BLEH_MAC_t ) ) == 0 )
@@ -119,6 +127,8 @@ void incoming_frame_handler()
 		}
 		break;
 	}
+
+	return skip;
 }
 
 int main()
@@ -130,6 +140,8 @@ int main()
 
 	iSLERInit( LL_TX_POWER_0_DBM );
 
+	isler_config( ACCESS_ADDRESS, 0x555555, PHY_MODE );
+
 	debugger = !WaitForDebuggerToAttach( 1000 );
 	logf( ".~ ch32fun bleh ~.\n" );
 	logf( "SysCLK: %d MHz\n", FUNCONF_SYSTEM_CORE_CLOCK / 1000000 );
@@ -137,20 +149,29 @@ int main()
 	adv[1] = sizeof( adv ) - 2;
 	scan_rsp[1] = sizeof( scan_rsp ) - 2;
 
-	size_t last_ms = SysTick_Ms;
+	uint32_t last_ticks = SysTick->CNT;
+
+	const uint32_t adv_interval_ticks = US_TO_TICKS( 625 * 160 ); // 100ms
+	logf( "Adv interval ticks: %d, %dus, %dms\n", (int)adv_interval_ticks,
+		(int)( adv_interval_ticks / ( FUNCONF_SYSTEM_CORE_CLOCK / 1000000 ) ),
+		(int)( adv_interval_ticks / ( FUNCONF_SYSTEM_CORE_CLOCK / 1000 ) ) );
+	int ch = 0;
 
 	while ( 1 )
 	{
-		if ( SysTick_Ms - last_ms > 500 )
+
+		if ( SysTick->CNT - last_ticks > adv_interval_ticks )
 		{
-			last_ms = SysTick_Ms;
-			iSLERTX( ACCESS_ADDRESS, adv, sizeof( adv ), adv_channels[0], PHY_MODE );
+			last_ticks = SysTick->CNT;
+			ch = ch == 2 ? 0 : ch + 1;
+			isler_tx( adv, sizeof( adv ), adv_channels[ch] );
 		}
 
-		iSLERRX( ACCESS_ADDRESS, 37, PHY_MODE );
+		isler_rx( adv_channels[ch] );
 		while ( !rx_ready );
 
-		incoming_frame_handler();
+		const bool skip = incoming_frame_handler( ch );
+		(void)skip;
 	}
 }
 

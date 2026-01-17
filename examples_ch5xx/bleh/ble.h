@@ -93,7 +93,7 @@ typedef struct PACKED
 } BLEH_Adv_ConnectReq_t;
 
 
-uint8_t adv_channels[] = { 37, 38, 39 };
+const uint8_t adv_channels[] = { 37, 38, 39 };
 static bool debugger = false;
 
 const char *pdu_toString( uint8_t pdu )
