@@ -100,8 +100,15 @@ bool incoming_frame_handler( int channel )
 			BLEH_Adv_ScanReq_t *req = data;
 			if ( bleh_for_me( req, me.mac ) )
 			{
+#if 0
+            const uint32_t timestamp = SysTick->CNT;
+            const uint32_t delta = timestamp - rx_timestamp;
+            const uint32_t delta_us = delta / ( FUNCONF_SYSTEM_CORE_CLOCK / 1000000 );
+            logf( "SCAN REQ on channel %d, delta: %dus, %d ticks\r\n", channel, (int)delta_us, (int)delta );
+#endif
+
 #if 1
-				while ( SysTick->CNT - rx_timestamp < US_TO_TICKS( 150 ) )
+				while ( (uint32_t)SysTick->CNT - rx_timestamp < US_TO_TICKS( 150 ) )
 				{
 					; // wait 150us
 				}
@@ -160,7 +167,7 @@ int main()
 	while ( 1 )
 	{
 
-		if ( SysTick->CNT - last_ticks > adv_interval_ticks )
+		if ( (uint32_t)SysTick->CNT - last_ticks > adv_interval_ticks )
 		{
 			last_ticks = SysTick->CNT;
 			ch = ch == 2 ? 0 : ch + 1;
