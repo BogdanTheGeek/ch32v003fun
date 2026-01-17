@@ -139,23 +139,26 @@ void hexdump( const void *data, int size )
 		"crcinit: 0x%02x%02x%02x\r\n"                                                 \
 		"win size: %d, win offset: %d\r\n"                                            \
 		"interval: %d, latency: %d, timeout: %d\r\n"                                  \
-		"chan map: 0x%02x%02x%02x%02x\r\n"                                            \
+		"chan map: 0x%02x%02x%02x%02x%02x\r\n"                                        \
 		"hop: %d, sca: %d\r\n"
 
 #define CONNECT_REQ_ARGS( req )                                                                                      \
 	len, MAC_ARGS( req->initiator.mac ), MAC_ARGS( req->advertiser.mac ),                                            \
 		req->aa[0] | ( req->aa[1] << 8 ) | ( req->aa[2] << 16 ) | ( req->aa[3] << 24 ), req->crcinit[2],             \
 		req->crcinit[1], req->crcinit[0], req->win_size, req->win_offset, req->interval, req->latency, req->timeout, \
-		req->chan_map[0], req->chan_map[1], req->chan_map[2], req->chan_map[3], req->hop_sca & 0x1f,                 \
-		( req->hop_sca >> 5 ) & 0x07
+		req->chan_map[0], req->chan_map[1], req->chan_map[2], req->chan_map[3], req->chan_map[4],                    \
+		bleh_get_hop( req->hop_sca ), bleh_get_sca( req->hop_sca )
 
 #define TO_MAC( data ) ( (BLEH_MAC_t *)( data ) )
 
 #define bleh_get_pdu( frame ) ( frame[0] & 0b00001111 )
 #define bleh_get_len( frame ) ( frame[1] & 0b111111 )
 
-#define bleh_for_me( req, my_mac ) ( memcmp( req->advertiser.mac, my_mac, sizeof(BLEH_MAC_t) ) == 0 )
-#define bleh_from( req, my_mac ) ( memcmp( req->initiator.mac, my_mac, sizeof(BLEH_MAC_t) ) == 0 )
+#define bleh_get_hop( hop_sca ) ( ( hop_sca >> 5 ) & 0x03 )
+#define bleh_get_sca( hop_sca ) ( hop_sca & 0x07 )
+
+#define bleh_for_me( req, my_mac ) ( memcmp( req->advertiser.mac, my_mac, sizeof( BLEH_MAC_t ) ) == 0 )
+#define bleh_from( req, my_mac ) ( memcmp( req->initiator.mac, my_mac, sizeof( BLEH_MAC_t ) ) == 0 )
 
 
 void bleh_print( uint8_t *frame )
@@ -163,7 +166,7 @@ void bleh_print( uint8_t *frame )
 	const uint8_t pdu = bleh_get_pdu( frame );
 	const uint8_t len = bleh_get_len( frame );
 
-   void * data = &frame[2];
+	void *data = &frame[2];
 
 	switch ( pdu )
 	{
