@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stdint.h>
+#include <stdbool.h>
+
 #define VA_NARGS( ... ) ( sizeof( (int[]){ __VA_ARGS__ } ) / sizeof( int ) )
 
 // MAC address (6 bytes, reversed)
