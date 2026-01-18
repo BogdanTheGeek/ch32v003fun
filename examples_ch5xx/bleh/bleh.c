@@ -71,9 +71,9 @@ __attribute__( ( aligned( 4 ) ) ) uint8_t adv[] = { 0x02, 0x0d, // header for LL
 #endif
 
 
-bool incoming_frame_handler( int channel )
+int incoming_frame_handler( int channel )
 {
-	bool skip = false;
+	int skip = 0;
 	// The chip stores the incoming frame in LLE_BUF, defined in extralibs/iSLER.h
 	uint8_t *frame = (uint8_t *)LLE_BUF;
 
@@ -115,7 +115,7 @@ bool incoming_frame_handler( int channel )
 #endif
 				// respond with a scan response
 				isler_tx( scan_rsp, sizeof( scan_rsp ), adv_channels[channel] );
-				skip = true;
+				skip = 1;
 			}
 			// static const uint8_t filter[6] = { 0xb0, 0xec, 0xa7, 0x55, 0xd4, 0x6b};
 			// if ( memcmp( req->initiator.mac, filter, sizeof( BLEH_MAC_t ) ) == 0 )
@@ -177,7 +177,7 @@ int main()
 		isler_rx( adv_channels[ch] );
 		while ( !rx_ready );
 
-		const bool skip = incoming_frame_handler( ch );
+		const int skip = incoming_frame_handler( ch );
 		(void)skip;
 	}
 }
