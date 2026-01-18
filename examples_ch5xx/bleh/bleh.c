@@ -293,6 +293,7 @@ int main()
 						// no frame received in window
 						last_ticks = SysTick->CNT;
 						state = STATE_ADV;
+						isler_config( ACCESS_ADDRESS, 0x555555, PHY_MODE );
 						break;
 					}
 					bleh_LL_print( frame );
