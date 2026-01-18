@@ -1,7 +1,7 @@
 #pragma once
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #define VA_NARGS( ... ) ( sizeof( (int[]){ __VA_ARGS__ } ) / sizeof( int ) )
 
@@ -74,6 +74,12 @@ typedef struct
 	uint8_t len;
 } BLEH_Adv_Header_t;
 
+#define bleh_get_pdu( frame ) ( frame[0] & 0b00001111 )
+#define bleh_get_len( frame ) ( frame[1] & 0b111111 )
+
+#define bleh_get_hop( hop_sca ) ( hop_sca & 0x1f )
+#define bleh_get_sca( hop_sca ) ( hop_sca >> 5 )
+
 typedef struct
 {
 	BLEH_MAC_t initiator;
@@ -86,15 +92,101 @@ typedef struct PACKED
 	BLEH_MAC_t advertiser;
 	uint8_t aa[4];
 	uint8_t crcinit[3];
-	uint8_t win_size;
-	uint16_t win_offset;
-	uint16_t interval;
+	uint8_t win_size; // 1.25 ms units
+	uint16_t win_offset; // 1.25 ms units
+	uint16_t interval; // 1.25 ms in the range of 7.5 ms to 4.0s
 	uint16_t latency;
 	uint16_t timeout;
 	uint8_t chan_map[5];
 	uint8_t hop_sca;
 } BLEH_Adv_ConnectReq_t;
 
+/*
+Connnect
+  Req
+   |
+   |<---win_offset--->|
+   |                  |<----window_size----->|
+   |                     | LL REQ |
+   |                              |         | LL RSP |
+   |                              |< T_ifs >|
+   |<-----------------------interval------------------------->|
+*/
+
+typedef struct PACKED
+{
+	uint8_t llid;
+	uint8_t len;
+} BLEH_Data_Header_t;
+
+#define bleh_ll_get_llid( header ) ( ( ( header )->llid ) & 3 )
+#define bleh_ll_get_nesn( header ) ( ( ( header )->llid >> 2 ) & 1 )
+#define bleh_ll_get_sn( header ) ( ( ( header )->llid >> 3 ) & 1 )
+#define bleh_ll_get_md( header ) ( ( ( header )->llid >> 4 ) & 1 )
+
+#define bleh_ll_ack( header ) ( ( ( !bleh_ll_get_nesn( header ) ) << 2 ) | ( bleh_ll_get_sn( header ) << 3 ) )
+
+typedef enum
+{
+	BLEH_LLID_DATA_CONTINUE = 0x01,
+	BLEH_LLID_DATA_START = 0x02,
+	BLEH_LLID_CONTROL = 0x03,
+} BLEH_LLID_e;
+
+typedef struct
+{
+	uint8_t opcode;
+} BLEH_LL_Header_t;
+
+// BLUETOOTH CORE SPECIFICATION Version 5.2 | Vol 6, Part B page 2895
+typedef enum
+{
+	BLEH_LL_CONNECTION_UPDATE_IND = 0x00,
+	BLEH_LL_CHANNEL_MAP_IND = 0x01,
+	BLEH_LL_TERMINATE_IND = 0x02,
+	BLEH_LL_ENC_REQ = 0x03,
+	BLEH_LL_ENC_RSP = 0x04,
+	BLEH_LL_START_ENC_REQ = 0x05,
+	BLEH_LL_START_ENC_RSP = 0x06,
+	BLEH_LL_UNKNOWN_RSP = 0x07,
+	BLEH_LL_FEATURE_REQ = 0x08,
+	BLEH_LL_FEATURE_RSP = 0x09,
+	BLEH_LL_PAUSE_ENC_REQ = 0x0A,
+	BLEH_LL_PAUSE_ENC_RSP = 0x0B,
+	BLEH_LL_VERSION_IND = 0x0C,
+	BLEH_LL_REJECT_IND = 0x0D,
+	BLEH_LL_SLAVE_FEATURE_REQ = 0x0E,
+	BLEH_LL_CONNECTION_PARAM_REQ = 0x0F,
+	BLEH_LL_CONNECTION_PARAM_RSP = 0x10,
+	BLEH_LL_REJECT_EXT_IND = 0x11,
+	BLEH_LL_PING_REQ = 0x12,
+	BLEH_LL_PING_RSP = 0x13,
+	BLEH_LL_LENGTH_REQ = 0x14,
+	BLEH_LL_LENGTH_RSP = 0x15,
+	BLEH_LL_PHY_REQ = 0x16,
+	BLEH_LL_PHY_RSP = 0x17,
+	BLEH_LL_PHY_UPDATE_IND = 0x18,
+	BLEH_LL_MIN_USED_CHANNELS_IND = 0x19,
+	BLEH_LL_CTE_REQ = 0x1A,
+	BLEH_LL_CTE_RSP = 0x1B,
+	BLEH_LL_PERIODIC_SYNC_IND = 0x1C,
+	BLEH_LL_CLOCK_ACCURACY_REQ = 0x1D,
+	BLEH_LL_CLOCK_ACCURACY_RSP = 0x1E,
+	BLEH_LL_CIS_REQ = 0x1F,
+	BLEH_LL_CIS_RSP = 0x20,
+	BLEH_LL_CIS_IND = 0x21,
+	BLEH_LL_CIS_TERMINATE_IND = 0x22,
+	BLEH_LL_POWER_CONTROL_REQ = 0x23,
+	BLEH_LL_POWER_CONTROL_RSP = 0x24,
+	BLEH_LL_POWER_CHANGE_IND = 0x25,
+} BLEH_LL_Opcode_e;
+
+typedef struct PACKED
+{
+	uint8_t version;
+	uint16_t company_id;
+	uint16_t sub_version;
+} BLEH_LL_Version_t;
 
 const uint8_t adv_channels[] = { 37, 38, 39 };
 static bool debugger = false;
@@ -112,6 +204,39 @@ const char *pdu_toString( uint8_t pdu )
 		case ADV_SCAN_IND: return GRN "ADV_SCAN_IND" RST;
 		case AUX_EXT_IND: return BLU "AUX_EXT_IND" RST;
 		case AUX_CONNNECT_RSP: return YEL "AUX_CONNNECT_RSP" RST;
+		default: return RED "UNKNOWN" RST;
+	}
+}
+
+const char *ll_opcode_toString( uint8_t opcode )
+{
+	switch ( opcode )
+	{
+		case BLEH_LL_CONNECTION_UPDATE_IND: return GRN "CONNECTION_UPDATE_IND" RST;
+		case BLEH_LL_CHANNEL_MAP_IND: return CYN "CHANNEL_MAP_IND" RST;
+		case BLEH_LL_TERMINATE_IND: return RED "TERMINATE_IND" RST;
+		case BLEH_LL_ENC_REQ: return MAG "ENC_REQ" RST;
+		case BLEH_LL_START_ENC_REQ: return MAG "START_ENC_REQ" RST;
+		case BLEH_LL_FEATURE_REQ: return CYN "FEATURE_REQ" RST;
+		case BLEH_LL_PAUSE_ENC_REQ: return MAG "PAUSE_ENC_REQ" RST;
+		case BLEH_LL_VERSION_IND: return BLU "VERSION_IND" RST;
+		case BLEH_LL_REJECT_IND: return RED "REJECT_IND" RST;
+		case BLEH_LL_SLAVE_FEATURE_REQ: return CYN "SLAVE_FEATURE_REQ" RST;
+		case BLEH_LL_CONNECTION_PARAM_REQ: return GRN "CONNECTION_PARAM_REQ" RST;
+		case BLEH_LL_REJECT_EXT_IND: return RED "REJECT_EXT_IND" RST;
+		case BLEH_LL_PING_REQ: return MAG "PING_REQ" RST;
+		case BLEH_LL_LENGTH_REQ: return CYN "LENGTH_REQ" RST;
+		case BLEH_LL_PHY_REQ: return BLU "PHY_REQ" RST;
+		case BLEH_LL_PHY_UPDATE_IND: return BLU "PHY_UPDATE_IND" RST;
+		case BLEH_LL_MIN_USED_CHANNELS_IND: return CYN "MIN_USED_CHANNELS_IND" RST;
+		case BLEH_LL_CTE_REQ: return MAG "CTE_REQ" RST;
+		case BLEH_LL_PERIODIC_SYNC_IND: return GRN "PERIODIC_SYNC_IND" RST;
+		case BLEH_LL_CLOCK_ACCURACY_REQ: return YEL "CLOCK_ACCURACY_REQ" RST;
+		case BLEH_LL_CIS_REQ: return GRN "CIS_REQ" RST;
+		case BLEH_LL_CIS_IND: return GRN "CIS_IND" RST;
+		case BLEH_LL_CIS_TERMINATE_IND: return RED "CIS_TERMINATE_IND" RST;
+		case BLEH_LL_POWER_CONTROL_REQ: return YEL "POWER_CONTROL_REQ" RST;
+		case BLEH_LL_POWER_CHANGE_IND: return YEL "POWER_CHANGE_IND" RST;
 		default: return RED "UNKNOWN" RST;
 	}
 }
@@ -134,7 +259,7 @@ void hexdump( const void *data, int size )
 #define GENERIC_PDU_ARGS( pdu, len ) pdu, pdu_toString( pdu ), len
 
 #define SCAN_REQ_FMT RED "SCAN REQ" RST ", len %d, src mac: " MAC_FMT ", dest mac: " MAC_FMT "\r\n"
-#define SCAN_REQ_ARGS( req ) len, MAC_ARGS( req->initiator.mac ), MAC_ARGS( req->advertiser.mac )
+#define SCAN_REQ_ARGS( req ) len, MAC_ARGS( ( req )->initiator.mac ), MAC_ARGS( ( req )->advertiser.mac )
 
 #define CONNECT_REQ_FMT                                                               \
 	YEL "CONNECT REQ" RST ", len %d, init mac: " MAC_FMT ", adv mac: " MAC_FMT "\r\n" \
@@ -145,20 +270,19 @@ void hexdump( const void *data, int size )
 		"chan map: 0x%02x%02x%02x%02x%02x\r\n"                                        \
 		"hop: %d, sca: %d\r\n"
 
-#define CONNECT_REQ_ARGS( req )                                                                                      \
-	len, MAC_ARGS( req->initiator.mac ), MAC_ARGS( req->advertiser.mac ),                                            \
-		req->aa[0] | ( req->aa[1] << 8 ) | ( req->aa[2] << 16 ) | ( req->aa[3] << 24 ), req->crcinit[2],             \
-		req->crcinit[1], req->crcinit[0], req->win_size, req->win_offset, req->interval, req->latency, req->timeout, \
-		req->chan_map[0], req->chan_map[1], req->chan_map[2], req->chan_map[3], req->chan_map[4],                    \
-		bleh_get_hop( req->hop_sca ), bleh_get_sca( req->hop_sca )
+#define CONNECT_REQ_ARGS( req )                                                                                \
+	len, MAC_ARGS( ( req )->initiator.mac ), MAC_ARGS( ( req )->advertiser.mac ),                              \
+		( req )->aa[0] | ( ( req )->aa[1] << 8 ) | ( ( req )->aa[2] << 16 ) | ( ( req )->aa[3] << 24 ),        \
+		( req )->crcinit[2], ( req )->crcinit[1], ( req )->crcinit[0], ( req )->win_size, ( req )->win_offset, \
+		( req )->interval, ( req )->latency, ( req )->timeout, ( req )->chan_map[4], ( req )->chan_map[3],     \
+		( req )->chan_map[2], ( req )->chan_map[1], ( req )->chan_map[0], bleh_get_hop( ( req )->hop_sca ),    \
+		bleh_get_sca( ( req )->hop_sca )
 
 #define TO_MAC( data ) ( (BLEH_MAC_t *)( data ) )
 
-#define bleh_get_pdu( frame ) ( frame[0] & 0b00001111 )
-#define bleh_get_len( frame ) ( frame[1] & 0b111111 )
-
-#define bleh_get_hop( hop_sca ) ( ( hop_sca >> 5 ) & 0x03 )
-#define bleh_get_sca( hop_sca ) ( hop_sca & 0x07 )
+#define LL_HEADER_FMT "LL Header: llid %d, nesn %d, sn %d, md %d, len %d\r\n"
+#define LL_HEADER_ARGS( hdr ) \
+	bleh_ll_get_llid( hdr ), bleh_ll_get_nesn( hdr ), bleh_ll_get_sn( hdr ), bleh_ll_get_md( hdr ), ( hdr )->len
 
 #define bleh_for_me( req, my_mac ) ( memcmp( req->advertiser.mac, my_mac, sizeof( BLEH_MAC_t ) ) == 0 )
 #define bleh_from( req, my_mac ) ( memcmp( req->initiator.mac, my_mac, sizeof( BLEH_MAC_t ) ) == 0 )
@@ -188,6 +312,31 @@ void bleh_print( uint8_t *frame )
 		break;
 		default:
 			logf( GENERIC_PDU_FMT, GENERIC_PDU_ARGS( pdu, len ) );
+			hexdump( &frame[0], len + 2 );
+			break;
+	}
+}
+
+void bleh_LL_print( uint8_t *frame )
+{
+	BLEH_Data_Header_t *hdr = (BLEH_Data_Header_t *)frame;
+	const uint8_t llid = bleh_ll_get_llid( hdr );
+	const uint8_t len = hdr->len;
+
+	void *data = &frame[2];
+	logf( LL_HEADER_FMT, LL_HEADER_ARGS( (BLEH_Data_Header_t *)frame ) );
+
+	switch ( llid )
+	{
+		case BLEH_LLID_CONTROL:
+		{
+			BLEH_LL_Header_t *ll_hdr = data;
+			logf( "LL Control, opcode: %d (%s)\r\n", ll_hdr->opcode, ll_opcode_toString( ll_hdr->opcode ) );
+			hexdump( &frame[0], len + 2 );
+		}
+		break;
+		default:
+			logf( "LL Data\r\n" );
 			hexdump( &frame[0], len + 2 );
 			break;
 	}

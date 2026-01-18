@@ -332,6 +332,7 @@ volatile uint32_t rx_ready;
 #endif
 
 volatile uint32_t rx_timestamp = 0;
+uint32_t current_channel = 0;
 
 #ifdef CH571_CH573
 __attribute__((interrupt))
@@ -758,6 +759,7 @@ void DevSetChannel(uint8_t channel) {
 #endif
 	RF->RF11 &= 0xfffffffd;
 	BB->CTRL_CFG = (BB->CTRL_CFG & 0xffffff80) | (channel & 0x7f);
+   current_channel = channel;
 }
 
 __HIGH_CODE
@@ -976,7 +978,6 @@ void isler_tx(uint8_t adv[], size_t len, uint8_t channel) {
 
 	// Wait for tuning bit to clear.
 	for( int timeout = 3000; !(RF->RF26 & 0x1000000) && timeout >= 0; timeout-- );
-
 
 	// This clears bit 17 (If set, seems to have no impact.)
 	LL->LL4 &= 0xfffdffff;
