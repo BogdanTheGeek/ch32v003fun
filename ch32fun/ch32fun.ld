@@ -165,6 +165,16 @@ SECTIONS
 			PROVIDE(_highcode_vma_end = .);
 		} >RAM AT>FLASH
 #endif
+		.manual_ram :
+		{
+			. = ALIGN(4);
+			PROVIDE(_manual_ram_vma_start = .);
+			*(.manual_ram*)
+			. = ALIGN(4);
+			PROVIDE(_manual_ram_vma_end = .);
+		} >RAM AT>FLASH
+
+		_flash_manual_ram_start = LOADADDR(.manual_ram);
 
 #if TARGET_MCU_LD == 11
 		.itcmalign :
