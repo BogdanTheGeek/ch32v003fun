@@ -61,6 +61,14 @@ void run_benchmark()
 	end = get_cycles();
 	print_result( "ADDI", end - start, overhead );
 
+	// --- 2.1 NOPS
+	start = get_cycles();
+	INSTR_100({
+		asm volatile( "nop" );
+	})
+	end = get_cycles();
+	print_result( "NOP", end - start, overhead );
+
 	// --- 3. SLLI (Shift Left Logical Immediate) ---
 	start = get_cycles();
 	INSTR_100({
