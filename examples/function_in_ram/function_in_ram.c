@@ -161,6 +161,13 @@ int main()
 {
 	SystemInit();
 
+	// Reset any pre-existing configuration
+	SysTick->CTLR = 0x0000;
+	
+	SysTick->CTLR |= SYSTICK_CTLR_STE   |  // Enable Counter
+	                 SYSTICK_CTLR_STCLK ;  // Set Clock Source to HCLK/1
+	
+
 	Delay_Ms( 500 );
 
 	printf( "Starting function in RAM test\r\n" );
